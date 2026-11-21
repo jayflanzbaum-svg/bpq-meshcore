@@ -115,7 +115,8 @@ Edit `meshcore_config.json`:
 "display": {
   "node_prefix": "N0CALL",
   "command_sep": "|",
-  "welcome": ["Welcome to the N0CALL-8 Mesh to BPQ Gateway.", "Send ? for commands"]
+  "welcome": ["Welcome to the N0CALL-8 Mesh to BPQ Gateway.", "Send ? for commands"],
+  "compact_lists": true
 }
 ```
 
@@ -124,6 +125,10 @@ Edit `meshcore_config.json`:
 - `command_sep` joins the `?` command list, so 17 commands fit in one
   message: `N0CALL BBS|CHAT|…|MHEARD`.
 - `welcome` is sent instead of the telnet port's CTEXT.
+- `compact_lists` shortens BBS message lists (`L`, `LM`, `LL`, ...) from
+  `5418 16-Nov PN 1298 N0CALL @N0CALL N1ABC test` to
+  `MSG#5418 NEW from N1ABC RE: test`. NEW marks unread personal mail;
+  bulletins end with their category, e.g. `[WSPR@WW]`.
 
 These change only what the mesh sees. Telnet and RF users are unaffected. A
 line too long for one message carries on in the next one, which starts with
@@ -149,7 +154,7 @@ Post on the private channel:
 - At the node: `BBS`, `CHAT`, `?`, your applications, `BYE`.
 - Inside the BBS: `L`, `LM`, `R 123`, `SP N0XYZ`, then the title, body lines
   and `/EX`. `B` leaves the BBS.
-- `M` pages on when a reply ended with `[M=more, n left]`.
+- `M` pages on when a reply ended with `[M=more, n pages left]` (one page = one reply of up to `chunks_per_reply` messages).
 
 Output is forwarded whenever it arrives, so a slow application still gets its
 answer through. Lines are packed into mesh messages of up to 118 characters,

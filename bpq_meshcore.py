@@ -65,7 +65,8 @@ DEFAULT_CONFIG = {
     #                "" removes it, null leaves it alone.
     #   command_sep: joins the node's "?" command list, e.g. "|"; null = as is.
     #   welcome:     lines sent instead of the telnet CTEXT; [] = send CTEXT.
-    "display": {"node_prefix": None, "command_sep": None, "welcome": []},
+    "display": {"node_prefix": None, "command_sep": None, "welcome": [],
+                "compact_lists": False},
     "users": {
         "N0CALL-Phone": {
             "pubkey": "",   # their public key (12+ hex chars) to allow DMs
@@ -186,14 +187,41 @@ def trim_for_mesh(s: str) -> str:
 CONT = "(cont) "
 _NODE_PREFIX = re.compile(r"^[A-Z0-9#]{1,6}:[A-Z0-9]{1,6}(?:-\d{1,2})?\} ")
 
+# A BPQMail message-list line (L, LM, LL, LB ...):
+# "5418   16-Nov PY    1298 N8FLA  @N4SFL  N4SFL  Welcome to the N4SFL BBS"
+#  number date   type+status size to [@at] from  subject
+_BBS_LIST_LINE = re.compile(
+    r"^(?P<num>\d+)\s+\d{1,2}-[A-Za-z]{3}\s+(?P<type>[BPT])(?P<status>[A-Z$])\s+\d+"
+    r"\s+(?P<to>\S+)\s+(?:@(?P<at>\S*)\s+)?(?P<frm>\S+)(?:\s+(?P<subj>.*))?$")
+
+
+def compact_list_line(line: str) -> str:
+    """'MSG#5418 from N4SFL RE: Welcome', with NEW on unread personal or
+    traffic messages and [TO@AT] (the category) on bulletins. Lines that
+    are not list lines come back unchanged."""
+    m = _BBS_LIST_LINE.match(line.rstrip())
+    if not m:
+        return line
+    out = f"MSG#{m['num']}"
+    if m["type"] != "B" and m["status"] == "N":
+        out += " NEW"
+    out += f" from {m['frm']} RE: {(m['subj'] or '').strip()}"
+    if m["type"] == "B":
+        out += f" [{m['to']}{'@' + m['at'] if m['at'] else ''}]"
+    return out
+
 
 def mesh_format(text: str, display: Dict) -> str:
-    """Mesh-only rewrites: the node's "ALIAS:CALL} " prefix, and the "?"
-    command list (a prefixed line of nothing but upper-case words)."""
+    """Mesh-only rewrites: the node's "ALIAS:CALL} " prefix, the "?"
+    command list (a prefixed line of nothing but upper-case words), and,
+    with compact_lists, BBS message-list lines."""
     prefix = display.get("node_prefix")
     sep = display.get("command_sep")
+    compact = display.get("compact_lists")
     out = []
     for line in text.split("\n"):
+        if compact:
+            line = compact_list_line(line)
         m = _NODE_PREFIX.match(line)
         if m:
             rest = line[m.end():]
@@ -408,7 +436,8 @@ class Bridge:
         batch, st.pending = st.pending[:n], st.pending[n:]
         for i, c in enumerate(batch):
             if i == len(batch) - 1 and st.pending:
-                tag = f"\n[M=more, {len(st.pending)} left]"
+                pages = -(-len(st.pending) // n)  # one page = one M reply
+                tag = f"\n[M=more, {pages} page{'s' if pages != 1 else ''} left]"
                 if len(c) + len(tag) > p["chunk_chars"]:
                     await self.say(c, st.dest)
                     c = tag.strip()
