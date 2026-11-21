@@ -67,7 +67,7 @@ DEFAULT_CONFIG = {
     #   welcome:     lines sent instead of the telnet CTEXT; [] = send CTEXT.
     "display": {"node_prefix": None, "command_sep": None, "welcome": [],
                 "compact_lists": False, "bbs_prompt": None,
-                "menu_on_return": False},
+                "menu_on_return": False, "app_names": None},
     "users": {
         "N0CALL-Phone": {
             "pubkey": "",   # their public key (12+ hex chars) to allow DMs
@@ -216,6 +216,7 @@ _BBS_PROMPT = re.compile(r"^de [A-Z0-9-]{3,9}>\s*$")
 _RETURNED = re.compile(r"^Returned to Node \S+\s*$")
 _CONNECTED_BBS = re.compile(r"Connected to BBS\b", re.I)
 _READ_NUM = re.compile(r"^([RrKk])(\d+)$")
+_CONNECTED_APP = re.compile(r"^\*\*\* Connected to (\S+)\s*$")
 
 
 def mesh_format(text: str, display: Dict) -> str:
@@ -234,6 +235,11 @@ def mesh_format(text: str, display: Dict) -> str:
             continue
         if bbs_prompt and _BBS_PROMPT.match(line):
             line = bbs_prompt
+        names = display.get("app_names")
+        if names is not None:
+            m = _CONNECTED_APP.match(line)
+            if m:   # "*** Connected to SPOTS" -> "*Connected to Live Spots*"
+                line = f"*Connected to {names.get(m[1], m[1])}*"
         if compact:
             line = compact_list_line(line)
         m = _NODE_PREFIX.match(line)

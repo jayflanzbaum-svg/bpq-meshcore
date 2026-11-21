@@ -118,7 +118,8 @@ Edit `meshcore_config.json`:
   "welcome": ["Welcome to the N0CALL-8 Mesh to BPQ Gateway.", "[?=Commands, BYE=Log off]"],
   "compact_lists": true,
   "bbs_prompt": "BBS>",
-  "menu_on_return": true
+  "menu_on_return": true,
+  "app_names": {"SPOTS": "Live Spots"}
 }
 ```
 
@@ -135,6 +136,8 @@ Edit `meshcore_config.json`:
 - `menu_on_return`: when BPQ says `Returned to Node` (after `NODE` in the
   BBS or `Q` in an app) the bridge drops that line and asks the node for
   `?`, so the user lands back at the node with its command list.
+- `app_names` turns BPQ's `*** Connected to SPOTS` into
+  `*Connected to Live Spots*`; apps not listed keep their command name.
 - In the BBS, `R5418` / `K5418` are sent as `R 5418` / `K 5418`, which is
   what BPQMail wants.
 
