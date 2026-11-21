@@ -1,0 +1,8 @@
+__pycache__/
+logs/
+# telnet passwords
+meshcore_config.json
+# private channel key + join QR
+channel-secrets/
+CLAUDE.md
+STATUS.md
