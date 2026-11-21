@@ -315,6 +315,7 @@ class NodeSession:
         self.last_used = time.monotonic()
         self.pump_task: Optional[asyncio.Task] = None
         self.in_bbs = False
+        self.in_app = False   # inside the BBS or an application, not at the node
         self.held = ""      # text kept back to go out with the node's "?" list
 
     async def _read_until(self, needle: bytes, timeout: float) -> bytes:
@@ -391,9 +392,12 @@ class NodeSession:
         plain = trim_for_mesh(clean_text(raw.decode("latin-1")))
         if _CONNECTED_BBS.search(plain):
             self.in_bbs = True
-        returned = any(_RETURNED.match(l) for l in plain.split("\n"))
+        lines = plain.split("\n")
+        if self.in_bbs or any(_CONNECTED_APP.match(l) for l in lines):
+            self.in_app = True
+        returned = any(_RETURNED.match(l) for l in lines)
         if returned:
-            self.in_bbs = False
+            self.in_bbs = self.in_app = False
         text = mesh_format(plain, self.display)
         if "invalid" in text.lower() and "password" in text.lower():
             log.error("[%s] BPQ rejected the telnet login", self.label)
@@ -596,6 +600,12 @@ class Bridge:
             fresh = True
         if fresh and body.upper() in GREETINGS:
             return                      # the node's welcome text is the reply
+        if body.upper() == "NODE" and not st.session.in_app:
+            # Already at the node (the app ended, or the session timed out).
+            # BPQ would read NODE as NODES and list every node heard.
+            if fresh:
+                return                  # the welcome text is the reply
+            body = "?"
         if fresh:
             await asyncio.sleep(0.5)    # let the welcome text arrive first
         m = _READ_NUM.match(body.strip())

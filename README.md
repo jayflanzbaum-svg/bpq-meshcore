@@ -140,6 +140,9 @@ Edit `meshcore_config.json`:
   `*Connected to Live Spots*`; apps not listed keep their command name.
 - In the BBS, `R5418` / `K5418` are sent as `R 5418` / `K 5418`, which is
   what BPQMail wants.
+- `NODE` typed at the node itself (the app already ended, or the session
+  timed out) shows the node's command list. BPQ would otherwise read it as
+  `NODES` and list every node heard.
 
 These change only what the mesh sees. Telnet and RF users are unaffected. A
 line too long for one message carries on in the next one, which starts with
