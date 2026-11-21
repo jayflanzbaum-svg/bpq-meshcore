@@ -93,8 +93,8 @@ Edit `meshcore_config.json`:
 - `"pubkey"` (the first 12 or more hex characters of their public key) lets
   that user **DM** the bridge. This is the recommended way in: a DM is private
   to that user, and only the holder of the key can send it.
-- Messages from names or keys not on the list are ignored and logged. An
-  unknown DM is logged as `ignored DM ... from unlisted key 05df63593866`,
+- Messages from names or keys not on the list are ignored and logged, unless
+  guests are on (below), which answers any DM. An unknown DM is logged as `ignored DM ... from unlisted key 05df63593866`,
   which is the easiest way to get a new user's key: they DM `hi`, you copy
   the key from the log.
 - Set `"channel": {"index": null}` to accept DMs only.
@@ -108,6 +108,36 @@ Edit `meshcore_config.json`:
 3. They DM `hi`. You copy their key from the log into their `"pubkey"`, give
    them a telnet `USER=` line, and restart the bridge (and BPQ, for the new
    USER line).
+
+### Guests and self-signup (`guests`)
+
+With `"guests": {"enabled": true}`, any MeshCore radio that DMs the bridge
+gets a guest menu, without a callsign or a node login:
+
+```
+N4SFL-8 Mesh Gateway - guest
+WX=Weather|SPOTS=Band activity|RPTSRCH=Repeaters|DIRECTIONS=Directions
+Ham? Send CALL <callsign> for more.
+```
+
+- **Guests never reach BPQ or RF.** The bridge connects them straight to the
+  internet-only applications on their `CMDPORT`s (`guests.apps`, command ->
+  port), sending `GUEST` + 6 hex of the radio's key as the callsign, the
+  way BPQ sends a user's callsign. Each radio keeps its own zip, grid and so
+  on. `BBS`, `CHAT`, `CONNECT` and `RMS` answer that they need a ham login.
+- **`CALL N0XYZ`** asks for more. The callsign is checked against the FCC
+  database (`guests.verify_url`, callook.info; US licenses only), then every
+  radio in `users` gets a DM and `guests.notify_project` (a notify-hub
+  project, folder in `guests.notify_path`) a text. A failed lookup still
+  goes to you, marked not verified.
+- **From any radio in `users`:** `APPROVE N0XYZ`, `DENY N0XYZ`, `PENDING`.
+  An approved member also gets `guests.member_apps` (default the two AI
+  apps), under their own callsign. Members are kept in `mesh_members.json`
+  (gitignored).
+- Full node and BBS access still needs a telnet `USER=` line and an entry in
+  `users`, as above.
+- The radio can only answer contacts, so the bridge turns on auto-add
+  contacts when guests are on. A new user floods one advert first.
 
 ### What the mesh sees (`display`, all optional)
 
@@ -207,7 +237,7 @@ is 20 messages). The rest is dropped and the last message reads
 
 ## Roadmap
 
-- A one-time reply to unlisted DM senders telling them how to register.
+- Approved members get their own node login without a BPQ restart.
 - A one-time new-mail notice for listed users.
 
 ## Files
@@ -218,6 +248,7 @@ is 20 messages). The rest is dropped and the last message reads
 | `tools/setup_radio.py` | name, radio preset, private channel, join QR |
 | `tools/test_login.py` | telnet login check, no radio |
 | `meshcore_config.json` | your settings and passwords (gitignored) |
+| `mesh_members.json` | guest signups and approvals (gitignored) |
 | `channel-secrets/` | channel key and QR (gitignored) |
 | `logs/bpq_meshcore.log` | rotating log (gitignored) |
 

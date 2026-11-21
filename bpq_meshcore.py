@@ -39,6 +39,9 @@ import logging.handlers
 import re
 import sys
 import time
+import urllib.error
+import urllib.request
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -66,6 +69,26 @@ DEFAULT_CONFIG = {
     "paging": {"chunk_chars": 118, "chunks_per_reply": 4, "gap_s": 2.5,
                "max_pages": 5},
     "adverts": {"flood_every_h": 12},
+    # Guests: any radio that DMs the bridge without being in "users". They
+    # never reach BPQ or RF: the bridge connects them straight to the
+    # internet-only apps on their BPQ CMDPORTs, as that radio's own user
+    # (GUEST + 6 hex of its key, so each keeps its own zip, grid, ...).
+    # Licensed hams can send CALL <callsign>: it is checked against the FCC
+    # (verify_url), the sysop radios in "users" get a DM and `notify_project`
+    # an alert, and APPROVE <call> from a sysop radio makes them a member,
+    # who also gets member_apps under their own callsign.
+    "guests": {
+        "enabled": False,
+        "host": "127.0.0.1",
+        "apps": {"WX": 63051, "SPOTS": 63050, "RPTSRCH": 63052, "DIRECTIONS": 63053},
+        "member_apps": {"OPENAI": 7373, "OFFGRIDAI": 7374},
+        "labels": {"WX": "Weather", "SPOTS": "Band activity", "RPTSRCH": "Repeaters",
+                   "DIRECTIONS": "Directions", "OPENAI": "AI", "OFFGRIDAI": "Offgrid AI"},
+        "title": "Mesh to BPQ Gateway",
+        "verify_url": "https://callook.info/{call}/json",
+        "notify_project": None,      # notify-hub project for signup alerts
+        "notify_path": None,         # folder holding notify_hub.py
+    },
     # Commands that move files or speak a binary protocol, which a mesh text
     # message cannot carry. Keyed by where the user is: "NODE", "BBS" or an
     # application's command name; matched on the first word typed. The
@@ -134,7 +157,7 @@ def load_config() -> Dict:
                   CONFIG_FILE.name, e.lineno, e.colno, e.msg, line)
         sys.exit(1)
     for k in ("radio", "channel", "bbs", "paging", "adverts", "display",
-              "telnet_only"):
+              "telnet_only", "guests"):
         cfg[k] = {**DEFAULT_CONFIG[k], **cfg.get(k, {})}
     cfg.setdefault("users", {})
     return cfg
@@ -457,6 +480,81 @@ class NodeSession:
         self.writer = None
 
 
+class AppSession(NodeSession):
+    """A guest's or member's connection straight to one node application's
+    TCP port, the way BPQ itself connects: the first line is the callsign,
+    then the user's lines both ways. No BPQ login, no RF."""
+
+    def __init__(self, cfg: Dict, callsign: str, app: str, port: int,
+                 label: str, on_output):
+        super().__init__(cfg, {"callsign": callsign}, label, on_output)
+        self.host = cfg["guests"]["host"]
+        self.port = port
+        self.in_app, self.app = True, app
+
+    async def open(self) -> None:
+        t = self.cfg["login_timeout_s"]
+        self.reader, self.writer = await asyncio.wait_for(
+            asyncio.open_connection(self.host, self.port), t)
+        self.closed = False
+        self.writer.write(self.user["callsign"].encode() + b"\r\n")
+        await self.writer.drain()
+        self.pump_task = asyncio.create_task(self._pump())
+        log.info("[%s] app %s open as %s", self.label, self.app, self.user["callsign"])
+
+    async def _emit(self, raw: bytes, closed: bool) -> None:
+        plain = trim_for_mesh(clean_text(raw.decode("latin-1")))
+        try:
+            await self.on_output(mesh_format(plain, self.display), closed)
+        except Exception:
+            log.exception("[%s] delivering output failed", self.label)
+
+    async def send_line(self, line: str) -> None:
+        self.last_used = time.monotonic()
+        self.writer.write(line.encode("latin-1", "replace") + b"\r\n")
+        await self.writer.drain()
+
+
+# ------------------------------------------------------------ members
+
+MEMBERS_FILE = HERE / "mesh_members.json"
+_CALLSIGN = re.compile(r"^(?=.*\d)[A-Z0-9]{3,7}$")
+
+
+def load_members() -> Dict[str, Dict]:
+    """Radio key prefix -> {callsign, name, status: pending|approved|denied, ...}."""
+    if not MEMBERS_FILE.exists():
+        return {}
+    try:
+        return json.loads(MEMBERS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        log.exception("%s unreadable; starting with no members", MEMBERS_FILE.name)
+        return {}
+
+
+def save_members(members: Dict[str, Dict]) -> None:
+    tmp = MEMBERS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(members, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(MEMBERS_FILE)
+
+
+def verify_callsign(url_tmpl: str, call: str) -> Dict:
+    """Ask callook.info (US licenses) about `call`. Returns {"status":
+    VALID|INVALID|UNKNOWN, "name", "oper_class"}; UNKNOWN when the lookup
+    could not be made, which the sysop then decides by hand."""
+    try:
+        req = urllib.request.Request(url_tmpl.format(call=call),
+                                     headers={"User-Agent": "bpq-meshcore-bridge"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            d = json.loads(r.read().decode("utf-8", "replace"))
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        log.warning("callsign lookup for %s failed: %s", call, e)
+        return {"status": "UNKNOWN", "name": "", "oper_class": ""}
+    return {"status": str(d.get("status", "UNKNOWN")).upper(),
+            "name": str(d.get("name") or "").title(),
+            "oper_class": str((d.get("current") or {}).get("operClass") or "").title()}
+
+
 # ---------------------------------------------------------------- bridge
 
 class UserState:
@@ -467,6 +565,7 @@ class UserState:
         self.cut = False                  # output capped; drop the rest
         self.dest: Optional[str] = None   # None = channel, else DM pubkey prefix
         self.lock = asyncio.Lock()        # one mesh message at a time per user
+        self.close_note: Optional[str] = None  # sent when the session ends
 
 
 def key_prefix(k: str) -> str:
@@ -480,6 +579,7 @@ class Bridge:
         self.users: Dict[str, UserState] = {}
         self.radio_lock = asyncio.Lock()   # one radio: sends go out in order
         self.chan = cfg["channel"].get("index")
+        self.members = load_members()
         self.by_key = {}
         for name, u in cfg["users"].items():
             kp = key_prefix(u.get("pubkey", ""))
@@ -543,15 +643,16 @@ class Bridge:
 
     def output_handler(self, name: str, st: UserState):
         async def handler(text: str, closed: bool) -> None:
+            note = st.close_note or "[Disconnected. Send anything to reconnect.]"
             if closed:
-                text = (text + "\n" if text else "") + "[Disconnected. Send anything to reconnect.]"
+                text = (text + "\n" if text else "") + note
                 st.session = None
             if not text:
                 return
             log.info("[%s] -> %d chars (%s)", name, len(text), st.dest or "channel")
             new = self.cap(name, st, chunk_text(text, self.cfg["paging"]["chunk_chars"]))
             if closed and st.cut and not new:
-                new = ["[Disconnected. Send anything to reconnect.]"]
+                new = chunk_text(note, self.cfg["paging"]["chunk_chars"])
             if not new:
                 return
             # Output that arrives while earlier pages wait is queued behind them.
@@ -583,6 +684,9 @@ class Bridge:
         body = str(p.get("text", ""))
         name = self.by_key.get(kp)
         if not name:
+            if self.cfg["guests"].get("enabled") and len(kp) == 12:
+                await self.dispatch_guest(kp, body)
+                return
             log.warning("ignored DM %r from unlisted key %s - add it as \"pubkey\" "
                         "to a user to allow it", body[:40], kp)
             return
@@ -601,6 +705,8 @@ class Bridge:
 
     async def handle(self, name: str, user: Dict, body: str) -> None:
         st = self.users[name]
+        if await self.admin_command(name, body, st.dest):
+            return
         if body.upper() == "M" and st.pending:
             await self.page_out(st)
             return
@@ -643,6 +749,174 @@ class Bridge:
             body = bare                 # a bare L would list every message
         await st.session.send_line(body)
 
+    # -- guests and members
+    async def reply(self, text: str, dest: Optional[str]) -> None:
+        """say(), split to the mesh message size like node output is."""
+        for c in chunk_text(text, self.cfg["paging"]["chunk_chars"]):
+            await self.say(c, dest)
+
+    def member(self, kp: str) -> Optional[Dict]:
+        m = self.members.get(kp)
+        return m if m and m.get("status") == "approved" else None
+
+    def guest_apps(self, kp: str) -> Dict[str, int]:
+        g = self.cfg["guests"]
+        apps = {k.upper(): int(v) for k, v in g["apps"].items()}
+        if self.member(kp):
+            apps.update({k.upper(): int(v) for k, v in g["member_apps"].items()})
+        return apps
+
+    def guest_menu(self, kp: str) -> str:
+        g = self.cfg["guests"]
+        labels = {k.upper(): v for k, v in g["labels"].items()}
+        apps = "|".join(f"{a}={labels.get(a, a)}" for a in self.guest_apps(kp))
+        m = self.members.get(kp) or {}
+        if m.get("status") == "approved":
+            head = f"{g['title']} - {m['callsign']}"
+            tail = ""
+        elif m.get("status") == "pending":
+            head = f"{g['title']} - guest"
+            tail = f"\n{m['callsign']} is waiting for sysop approval."
+        else:
+            head = f"{g['title']} - guest"
+            tail = "\nHam? Send CALL <callsign> for more."
+        return f"{head}\n{apps}{tail}\n[?=Commands, BYE=Log off]"
+
+    async def dispatch_guest(self, kp: str, body: str) -> None:
+        m = self.member(kp)
+        name = m["callsign"] if m else f"GUEST{kp[:6].upper()}"
+        log.info("[%s] <- %r via %s (guest)", name, body, kp)
+        st = self.users.setdefault("dm:" + kp, UserState())
+        try:
+            async with st.lock:
+                st.dest = kp
+                await self.handle_guest(name, kp, st, body.strip())
+        except Exception as e:
+            log.exception("[%s] handling %r failed", name, body)
+            await self.reply(f"Bridge error: {type(e).__name__}: {str(e)[:70]}", kp)
+
+    async def handle_guest(self, name: str, kp: str, st: UserState, body: str) -> None:
+        if body.upper() == "M" and st.pending:
+            await self.page_out(st)
+            return
+        st.pending = []
+        st.queued, st.cut = 0, False
+        word = (body.split() or [""])[0].upper()
+
+        if st.session and not st.session.closed:        # inside an app
+            blocked = self.cfg["telnet_only"]["commands"].get(st.session.app, [])
+            if word in (w.upper() for w in blocked):
+                await self.reply(self.cfg["telnet_only"]["message"], kp)
+                return
+            await st.session.send_line(body)
+            return
+
+        apps = self.guest_apps(kp)
+        if word in GREETINGS or word in ("?", "HELP", "MENU", "NODE"):
+            await self.reply(self.guest_menu(kp), kp)
+        elif word in ("BYE", "Q", "QUIT", "EXIT"):
+            await self.reply("73! Send anything to come back.", kp)
+        elif word == "CALL":
+            await self.signup(name, kp, body.split()[1:])
+        elif word in apps:
+            st.close_note = self.guest_menu(kp)
+            st.session = AppSession(self.cfg, name, word, apps[word], name,
+                                    self.output_handler(name, st))
+            try:
+                await st.session.open()
+            except Exception as e:
+                log.warning("[%s] app %s unreachable: %s", name, word, e)
+                st.session = None
+                await self.reply(f"{word} is offline right now. Try again later.", kp)
+        elif word in ("BBS", "CHAT", "CONNECT", "C", "RMS"):
+            await self.reply(f"{word} is for licensed hams with a node login. "
+                           "Send CALL <callsign> to ask.", kp)
+        else:
+            await self.reply(f"Unknown command {word[:12]}.\n" + self.guest_menu(kp), kp)
+
+    async def signup(self, name: str, kp: str, args: List[str]) -> None:
+        call = (args[0] if args else "").upper()
+        if not _CALLSIGN.match(call):
+            await self.reply("Send CALL and your callsign, e.g. CALL N0XYZ.", kp)
+            return
+        m = self.members.get(kp) or {}
+        if m.get("status") == "approved":
+            await self.reply(f"You are already approved as {m['callsign']}.", kp)
+            return
+        v = await asyncio.to_thread(verify_callsign, self.cfg["guests"]["verify_url"], call)
+        if v["status"] == "INVALID":
+            await self.reply(f"{call} is not in the FCC database (US licenses only "
+                           "for now). Check it and send CALL again.", kp)
+            return
+        self.members[kp] = {"callsign": call, "name": v["name"],
+                            "oper_class": v["oper_class"], "verified": v["status"] == "VALID",
+                            "status": "pending",
+                            "requested": datetime.now().isoformat(timespec="seconds")}
+        save_members(self.members)
+        first = v["name"].split()[0] if v["name"] else call
+        await self.reply(f"Thanks {first}. {call} is waiting for sysop approval; "
+                       "you'll get a message here.", kp)
+        who = f"{call} ({v['name'] or 'name unknown'}"
+        who += f", {v['oper_class']})" if v["oper_class"] else ")"
+        if v["status"] != "VALID":
+            who += " - NOT verified, lookup failed"
+        log.info("[%s] signup request: %s, radio %s", name, who, kp)
+        await self.tell_admins(f"Signup: {who}. Reply APPROVE {call} or DENY {call}.")
+        await asyncio.to_thread(self.notify, f"Mesh signup: {call}",
+                                f"{who} asked for N4SFL mesh access from radio {kp}.\n"
+                                f"Approve from your radio: APPROVE {call}")
+
+    async def tell_admins(self, text: str) -> None:
+        for u in self.cfg["users"].values():
+            kp = key_prefix(u.get("pubkey", ""))
+            if len(kp) == 12:
+                await self.reply(text, kp)
+
+    def notify(self, subject: str, body: str) -> None:
+        g = self.cfg["guests"]
+        if not g.get("notify_project") or not g.get("notify_path"):
+            return
+        try:
+            if g["notify_path"] not in sys.path:
+                sys.path.insert(0, g["notify_path"])
+            from notify_hub import send
+            r = send(g["notify_project"], "alert", subject, body)
+            if not r.ok:
+                log.error("signup alert not delivered: %s", r.summary())
+        except Exception:
+            log.exception("signup alert failed")
+
+    async def admin_command(self, name: str, body: str, dest: Optional[str]) -> bool:
+        """APPROVE <call>, DENY <call>, PENDING - from sysop radios only."""
+        words = body.split()
+        cmd = words[0].upper() if words else ""
+        if cmd not in ("APPROVE", "DENY", "PENDING"):
+            return False
+        if cmd == "PENDING":
+            p = [f"{m['callsign']} ({m.get('name') or '?'})"
+                 for m in self.members.values() if m.get("status") == "pending"]
+            await self.reply("Pending: " + (", ".join(p) if p else "none"), dest)
+            return True
+        call = words[1].upper() if len(words) > 1 else ""
+        hits = [(kp, m) for kp, m in self.members.items() if m.get("callsign") == call]
+        if not hits:
+            await self.reply(f"No signup for {call or '?'}. Send PENDING for the list.", dest)
+            return True
+        for kp, m in hits:
+            m["status"] = "approved" if cmd == "APPROVE" else "denied"
+            m["decided"] = datetime.now().isoformat(timespec="seconds")
+            m["decided_by"] = name
+        save_members(self.members)
+        log.info("[%s] %s %s", name, cmd.lower(), call)
+        await self.reply(f"{call} {'approved' if cmd == 'APPROVE' else 'denied'}.", dest)
+        for kp, _ in hits:
+            if cmd == "APPROVE":
+                await self.reply(f"Welcome {call}! You are approved. Send ? for your menu.", kp)
+            else:
+                await self.reply("Sorry, your request was not approved. Guest access "
+                               "still works: send ?", kp)
+        return True
+
     # -- housekeeping
     async def idle_reaper(self) -> None:
         limit = self.cfg["bbs"]["idle_close_s"]
@@ -678,9 +952,23 @@ class Bridge:
         self.mc.subscribe(EventType.CHANNEL_MSG_RECV, self.on_channel)
         self.mc.subscribe(EventType.CONTACT_MSG_RECV, self.on_dm)
         await self.mc.start_auto_message_fetching()
-        log.info("Listening on %s: channel %s, DMs from %d listed key(s); users: %s",
+        if self.cfg["guests"].get("enabled"):
+            # The radio can only answer a DM from a contact. With manual add
+            # on, a stranger's advert is not stored and their DMs go unanswered.
+            info = self.mc.self_info or {}
+            log.info("radio manual_add_contacts = %s", info.get("manual_add_contacts", "not reported"))
+            if info.get("manual_add_contacts"):
+                res = await self.mc.commands.set_manual_add_contacts(False)
+                if res.type == EventType.ERROR:
+                    log.error("could not turn on auto-add contacts: %s", res.payload)
+                else:
+                    log.info("guests: turned on auto-add contacts on the radio")
+        log.info("Listening on %s: channel %s, DMs from %d listed key(s); users: %s; "
+                 "guests %s, %d member(s)",
                  r["port"], self.chan, len(self.by_key),
-                 ", ".join(self.cfg["users"]) or "(nobody)")
+                 ", ".join(self.cfg["users"]) or "(nobody)",
+                 "on" if self.cfg["guests"].get("enabled") else "off",
+                 sum(1 for m in self.members.values() if m.get("status") == "approved"))
         tasks = [asyncio.create_task(self.idle_reaper()),
                  asyncio.create_task(self.advertiser())]
         try:

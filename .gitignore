@@ -6,3 +6,5 @@ meshcore_config.json
 channel-secrets/
 CLAUDE.md
 STATUS.md
+mesh_members.json
+mesh_members.tmp
