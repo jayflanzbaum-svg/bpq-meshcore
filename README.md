@@ -115,8 +115,10 @@ Edit `meshcore_config.json`:
 "display": {
   "node_prefix": "N0CALL",
   "command_sep": "|",
-  "welcome": ["Welcome to the N0CALL-8 Mesh to BPQ Gateway.", "Send ? for commands"],
-  "compact_lists": true
+  "welcome": ["Welcome to the N0CALL-8 Mesh to BPQ Gateway.", "[?=Commands, BYE=Log off]"],
+  "compact_lists": true,
+  "bbs_prompt": "BBS>",
+  "menu_on_return": true
 }
 ```
 
@@ -129,6 +131,12 @@ Edit `meshcore_config.json`:
   `5418 16-Nov PN 1298 N0CALL @N0CALL N1ABC test` to
   `MSG#5418 NEW from N1ABC RE: test`. NEW marks unread personal mail;
   bulletins end with their category, e.g. `[WSPR@WW]`.
+- `bbs_prompt` replaces the BBS's `de CALL>` prompt.
+- `menu_on_return`: when BPQ says `Returned to Node` (after `NODE` in the
+  BBS or `Q` in an app) the bridge drops that line and asks the node for
+  `?`, so the user lands back at the node with its command list.
+- In the BBS, `R5418` / `K5418` are sent as `R 5418` / `K 5418`, which is
+  what BPQMail wants.
 
 These change only what the mesh sees. Telnet and RF users are unaffected. A
 line too long for one message carries on in the next one, which starts with

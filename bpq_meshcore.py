@@ -66,7 +66,8 @@ DEFAULT_CONFIG = {
     #   command_sep: joins the node's "?" command list, e.g. "|"; null = as is.
     #   welcome:     lines sent instead of the telnet CTEXT; [] = send CTEXT.
     "display": {"node_prefix": None, "command_sep": None, "welcome": [],
-                "compact_lists": False},
+                "compact_lists": False, "bbs_prompt": None,
+                "menu_on_return": False},
     "users": {
         "N0CALL-Phone": {
             "pubkey": "",   # their public key (12+ hex chars) to allow DMs
@@ -211,15 +212,28 @@ def compact_list_line(line: str) -> str:
     return out
 
 
+_BBS_PROMPT = re.compile(r"^de [A-Z0-9-]{3,9}>\s*$")
+_RETURNED = re.compile(r"^Returned to Node \S+\s*$")
+_CONNECTED_BBS = re.compile(r"Connected to BBS\b", re.I)
+_READ_NUM = re.compile(r"^([RrKk])(\d+)$")
+
+
 def mesh_format(text: str, display: Dict) -> str:
     """Mesh-only rewrites: the node's "ALIAS:CALL} " prefix, the "?"
-    command list (a prefixed line of nothing but upper-case words), and,
-    with compact_lists, BBS message-list lines."""
+    command list (a prefixed line of nothing but upper-case words), the
+    BBS's "de CALL>" prompt (bbs_prompt), and, with compact_lists, BBS
+    message-list lines. With menu_on_return, BPQ's "Returned to Node"
+    line is dropped: the node's command list follows in its place."""
     prefix = display.get("node_prefix")
     sep = display.get("command_sep")
     compact = display.get("compact_lists")
+    bbs_prompt = display.get("bbs_prompt")
     out = []
     for line in text.split("\n"):
+        if display.get("menu_on_return") and _RETURNED.match(line):
+            continue
+        if bbs_prompt and _BBS_PROMPT.match(line):
+            line = bbs_prompt
         if compact:
             line = compact_list_line(line)
         m = _NODE_PREFIX.match(line)
@@ -288,6 +302,8 @@ class NodeSession:
         self.closed = True
         self.last_used = time.monotonic()
         self.pump_task: Optional[asyncio.Task] = None
+        self.in_bbs = False
+        self.held = ""      # text kept back to go out with the node's "?" list
 
     async def _read_until(self, needle: bytes, timeout: float) -> bytes:
         buf = b""
@@ -360,9 +376,27 @@ class NodeSession:
         await self._emit(buf, True)
 
     async def _emit(self, raw: bytes, closed: bool) -> None:
-        text = mesh_format(trim_for_mesh(clean_text(raw.decode("latin-1"))), self.display)
+        plain = trim_for_mesh(clean_text(raw.decode("latin-1")))
+        if _CONNECTED_BBS.search(plain):
+            self.in_bbs = True
+        returned = any(_RETURNED.match(l) for l in plain.split("\n"))
+        if returned:
+            self.in_bbs = False
+        text = mesh_format(plain, self.display)
         if "invalid" in text.lower() and "password" in text.lower():
             log.error("[%s] BPQ rejected the telnet login", self.label)
+        if self.held:
+            text, self.held = (self.held + "\n" + text) if text else self.held, ""
+        if returned and not closed and self.display.get("menu_on_return"):
+            # Back at the node: ask it for its command list and send what we
+            # have along with that reply, so it all goes out together.
+            self.held = text
+            try:
+                await self.send_line("?")
+                return
+            except Exception:
+                log.exception("[%s] asking the node for its command list failed", self.label)
+                text, self.held = self.held, ""
         try:
             await self.on_output(text, closed)
         except Exception:
@@ -437,7 +471,7 @@ class Bridge:
         for i, c in enumerate(batch):
             if i == len(batch) - 1 and st.pending:
                 pages = -(-len(st.pending) // n)  # one page = one M reply
-                tag = f"\n[M=more, {pages} page{'s' if pages != 1 else ''} left]"
+                tag = f"\n[M=More, {pages} page{'s' if pages != 1 else ''} left]"
                 if len(c) + len(tag) > p["chunk_chars"]:
                     await self.say(c, st.dest)
                     c = tag.strip()
@@ -522,6 +556,9 @@ class Bridge:
             return                      # the node's welcome text is the reply
         if fresh:
             await asyncio.sleep(0.5)    # let the welcome text arrive first
+        m = _READ_NUM.match(body.strip())
+        if m and st.session.in_bbs:
+            body = f"{m[1]} {m[2]}"     # the BBS wants "R 5387", phones type R5387
         await st.session.send_line(body)
 
     # -- housekeeping
