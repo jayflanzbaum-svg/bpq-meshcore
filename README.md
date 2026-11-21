@@ -166,6 +166,9 @@ Post on the private channel:
 - Inside the BBS: `L`, `LM`, `R 123`, `SP N0XYZ`, then the title, body lines
   and `/EX`. `B` leaves the BBS.
 - `M` pages on when a reply ended with `[M=more, n pages left]` (one page = one reply of up to `chunks_per_reply` messages).
+- A bare `L` in the BBS is sent as `LL 10` (the last 10 messages), because
+  plain `L` lists everything you haven't listed yet, often hundreds of lines.
+  Set `bbs.bare_list` to another command, or to `null` to send `L` as typed.
 
 Output is forwarded whenever it arrives, so a slow application still gets its
 answer through. Lines are packed into mesh messages of up to 118 characters,
@@ -173,6 +176,10 @@ answer through. Lines are packed into mesh messages of up to 118 characters,
 save airtime. A session closes after 10 minutes of silence. All of these are
 settings in `meshcore_config.json` (`paging`, `bbs.quiet_s`,
 `bbs.idle_close_s`).
+
+One command never sends more than `paging.max_pages` pages (default 5, which
+is 20 messages). The rest is dropped and the last message reads
+`[List cut at 20 msgs. Try LL 10 or L 5590-5595]`. Set it to `0` for no cap.
 
 ## Security and licensing
 

@@ -57,8 +57,14 @@ DEFAULT_CONFIG = {
         "login_timeout_s": 15,
         "quiet_s": 1.5,
         "idle_close_s": 600,
+        # A bare "L" in the BBS lists every message; send this instead.
+        # null leaves "L" alone.
+        "bare_list": "LL 10",
     },
-    "paging": {"chunk_chars": 118, "chunks_per_reply": 4, "gap_s": 2.5},
+    # max_pages: most pages one command may send (0 = no cap); the rest is
+    #            dropped with a hint to ask for less.
+    "paging": {"chunk_chars": 118, "chunks_per_reply": 4, "gap_s": 2.5,
+               "max_pages": 5},
     "adverts": {"flood_every_h": 12},
     # Mesh-only rewrites of what BPQ sends (telnet/RF users are unaffected).
     #   node_prefix: replaces "ALIAS:CALL} " at the start of node replies;
@@ -432,6 +438,8 @@ class UserState:
     def __init__(self) -> None:
         self.session: Optional[NodeSession] = None
         self.pending: List[str] = []
+        self.queued = 0                   # messages queued since the last command
+        self.cut = False                  # output capped; drop the rest
         self.dest: Optional[str] = None   # None = channel, else DM pubkey prefix
         self.lock = asyncio.Lock()        # one mesh message at a time per user
 
@@ -485,6 +493,29 @@ class Bridge:
                     c += tag
             await self.say(c, st.dest)
 
+    def cap(self, name: str, st: UserState, new: List[str]) -> List[str]:
+        """Keep one command's output within paging.max_pages pages."""
+        p = self.cfg["paging"]
+        limit = (p.get("max_pages") or 0) * p["chunks_per_reply"]
+        if not limit:
+            return new
+        if st.cut:
+            log.info("[%s] dropped %d more messages (over the cap)", name, len(new))
+            return []
+        room = limit - st.queued
+        if len(new) <= room:
+            st.queued += len(new)
+            return new
+        log.info("[%s] output cut at %d messages, dropped %d", name, limit,
+                 len(new) - max(room, 0))
+        note = f"[List cut at {limit} msgs. Try LL 10 or L 5590-5595]"
+        keep = new[:max(room, 1)]
+        last = keep[-1] + "\n" + note
+        keep[-1] = last if len(last) <= p["chunk_chars"] else note
+        st.cut = True
+        st.queued = limit
+        return keep
+
     def output_handler(self, name: str, st: UserState):
         async def handler(text: str, closed: bool) -> None:
             if closed:
@@ -493,7 +524,11 @@ class Bridge:
             if not text:
                 return
             log.info("[%s] -> %d chars (%s)", name, len(text), st.dest or "channel")
-            new = chunk_text(text, self.cfg["paging"]["chunk_chars"])
+            new = self.cap(name, st, chunk_text(text, self.cfg["paging"]["chunk_chars"]))
+            if closed and st.cut and not new:
+                new = ["[Disconnected. Send anything to reconnect.]"]
+            if not new:
+                return
             # Output that arrives while earlier pages wait is queued behind them.
             if st.pending:
                 st.pending.extend(new)
@@ -545,6 +580,7 @@ class Bridge:
             await self.page_out(st)
             return
         st.pending = []
+        st.queued, st.cut = 0, False      # a new command gets a fresh cap
 
         fresh = False
         if not st.session or st.session.closed:
@@ -565,6 +601,9 @@ class Bridge:
         m = _READ_NUM.match(body.strip())
         if m and st.session.in_bbs:
             body = f"{m[1]} {m[2]}"     # the BBS wants "R 5387", phones type R5387
+        bare = self.cfg["bbs"].get("bare_list")
+        if bare and st.session.in_bbs and body.strip().upper() == "L":
+            body = bare                 # a bare L would list every message
         await st.session.send_line(body)
 
     # -- housekeeping
