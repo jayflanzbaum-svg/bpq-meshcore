@@ -15,10 +15,20 @@ Every mesh message is sent to BPQ as one line. Output is forwarded whenever
 it arrives (an AI answer that takes 20 s still gets delivered), once BPQ has
 been quiet for quiet_s.
 
-Phase 1: one private channel and an allow-list of sender names. Channel
-sender names are NOT authenticated (anyone holding the channel key can type
-any name), so the channel key is the real access control. Phase 2 moves
-sessions to direct messages keyed by public key (see README).
+Two ways in, both checked against the "users" allow-list:
+
+  Direct message (recommended): the user DMs this radio. Matched by the
+  sender's PUBLIC KEY ("pubkey" in their user entry), which only the holder
+  of the private key can produce, and private to that user. Replies go back
+  as DMs with ACK and retries.
+
+  Private channel: matched by the sender NAME before the colon. Channel names
+  are NOT authenticated and every key holder sees every session, so use it
+  for the sysop only, or set channel.index to null to turn it off.
+
+The radio has to know a DM sender as a contact before it can decrypt their
+messages, so a new user sends one advert first. The bridge floods its own
+advert at start and every adverts.flood_every_h hours so users can add it.
 """
 from __future__ import annotations
 
@@ -49,8 +59,16 @@ DEFAULT_CONFIG = {
         "idle_close_s": 600,
     },
     "paging": {"chunk_chars": 118, "chunks_per_reply": 4, "gap_s": 2.5},
+    "adverts": {"flood_every_h": 12},
+    # Mesh-only rewrites of what BPQ sends (telnet/RF users are unaffected).
+    #   node_prefix: replaces "ALIAS:CALL} " at the start of node replies;
+    #                "" removes it, null leaves it alone.
+    #   command_sep: joins the node's "?" command list, e.g. "|"; null = as is.
+    #   welcome:     lines sent instead of the telnet CTEXT; [] = send CTEXT.
+    "display": {"node_prefix": None, "command_sep": None, "welcome": []},
     "users": {
         "N0CALL-Phone": {
+            "pubkey": "",   # their public key (12+ hex chars) to allow DMs
             "callsign": "N0CALL",
             "telnet_user": "CHANGE_ME",
             "telnet_password": "CHANGE_ME",
@@ -96,7 +114,7 @@ def load_config() -> Dict:
         log.error("%s is not valid JSON: line %d col %d: %s\n    %s",
                   CONFIG_FILE.name, e.lineno, e.colno, e.msg, line)
         sys.exit(1)
-    for k in ("radio", "channel", "bbs", "paging"):
+    for k in ("radio", "channel", "bbs", "paging", "adverts", "display"):
         cfg[k] = {**DEFAULT_CONFIG[k], **cfg.get(k, {})}
     cfg.setdefault("users", {})
     return cfg
@@ -165,22 +183,55 @@ def trim_for_mesh(s: str) -> str:
     return clean_text("\n".join(keep))
 
 
+CONT = "(cont) "
+_NODE_PREFIX = re.compile(r"^[A-Z0-9#]{1,6}:[A-Z0-9]{1,6}(?:-\d{1,2})?\} ")
+
+
+def mesh_format(text: str, display: Dict) -> str:
+    """Mesh-only rewrites: the node's "ALIAS:CALL} " prefix, and the "?"
+    command list (a prefixed line of nothing but upper-case words)."""
+    prefix = display.get("node_prefix")
+    sep = display.get("command_sep")
+    out = []
+    for line in text.split("\n"):
+        m = _NODE_PREFIX.match(line)
+        if m:
+            rest = line[m.end():]
+            words = rest.split()
+            if sep and len(words) >= 5 and all(re.fullmatch(r"[A-Z0-9]+", w) for w in words):
+                rest = sep.join(words)
+            if prefix is None:
+                line = m.group(0) + rest
+            else:
+                line = (prefix + " " if prefix else "") + rest
+        out.append(line)
+    return "\n".join(out)
+
+
 def chunk_text(s: str, limit: int) -> List[str]:
     """Split into chunks of at most `limit` chars, breaking at line ends
-    first, then at spaces, then hard. Lines are packed together while they
-    fit, joined by newlines (the MeshCore apps show them as line breaks)."""
+    first, then after a space or "|", then hard. Lines are packed together
+    while they fit, joined by newlines (the MeshCore apps show them as line
+    breaks). A line too long for one message carries on in the next, which
+    starts with CONT so it reads as a continuation."""
     chunks: List[str] = []
     cur = ""
     for line in s.split("\n"):
-        while len(line) > limit:
-            cut = line.rfind(" ", 0, limit + 1)
-            if cut < limit // 2:
-                cut = limit
+        first = True
+        while len(line) > (limit if first else limit - len(CONT)):
+            room = limit if first else limit - len(CONT)
+            cut = max(line.rfind(" ", 0, room + 1), line.rfind("|", 0, room) + 1)
+            if cut < room // 2:
+                cut = room
             piece, line = line[:cut].rstrip(), line[cut:].lstrip()
             if cur:
                 chunks.append(cur)
                 cur = ""
-            chunks.append(piece)
+            chunks.append(piece if first else CONT + piece)
+            first = False
+        if not first and line:
+            chunks.append(CONT + line)
+            continue
         cand = line if not cur else cur + "\n" + line
         if len(cand) <= limit:
             cur = cand
@@ -200,6 +251,7 @@ class NodeSession:
 
     def __init__(self, cfg: Dict, user: Dict, label: str, on_output):
         self.cfg = cfg["bbs"]
+        self.display = cfg.get("display", {})
         self.user = user
         self.label = label
         self.on_output = on_output          # async fn(text, closed: bool)
@@ -232,6 +284,25 @@ class NodeSession:
         await self._read_until(b"Password:", t)
         self.writer.write(self.user["telnet_password"].encode() + b"\r\n")
         await self.writer.drain()
+        # The telnet CTEXT arrives right after login. Read it here, before the
+        # pump starts, so the configured mesh welcome can stand in for it.
+        ctext = b""
+        end = time.monotonic() + t
+        while time.monotonic() < end:
+            try:
+                data = await asyncio.wait_for(self.reader.read(4096), self.cfg["quiet_s"])
+            except asyncio.TimeoutError:
+                if ctext:
+                    break
+                continue
+            if not data:
+                break
+            ctext += strip_telnet(data)
+        welcome = self.display.get("welcome") or []
+        if welcome and b"invalid" not in ctext.lower():
+            await self.on_output("\n".join(welcome), False)
+        else:
+            await self._emit(ctext, False)
         self.pump_task = asyncio.create_task(self._pump())
         log.info("[%s] node session open as %s", self.label, self.user["callsign"])
 
@@ -261,7 +332,7 @@ class NodeSession:
         await self._emit(buf, True)
 
     async def _emit(self, raw: bytes, closed: bool) -> None:
-        text = trim_for_mesh(clean_text(raw.decode("latin-1")))
+        text = mesh_format(trim_for_mesh(clean_text(raw.decode("latin-1"))), self.display)
         if "invalid" in text.lower() and "password" in text.lower():
             log.error("[%s] BPQ rejected the telnet login", self.label)
         try:
@@ -293,7 +364,12 @@ class UserState:
     def __init__(self) -> None:
         self.session: Optional[NodeSession] = None
         self.pending: List[str] = []
-        self.lock = asyncio.Lock()   # one mesh message at a time per user
+        self.dest: Optional[str] = None   # None = channel, else DM pubkey prefix
+        self.lock = asyncio.Lock()        # one mesh message at a time per user
+
+
+def key_prefix(k: str) -> str:
+    return re.sub(r"[^0-9a-f]", "", (k or "").lower())[:12]
 
 
 class Bridge:
@@ -302,14 +378,28 @@ class Bridge:
         self.mc: Optional[MeshCore] = None
         self.users: Dict[str, UserState] = {}
         self.radio_lock = asyncio.Lock()   # one radio: sends go out in order
-        self.chan = cfg["channel"]["index"]
+        self.chan = cfg["channel"].get("index")
+        self.by_key = {}
+        for name, u in cfg["users"].items():
+            kp = key_prefix(u.get("pubkey", ""))
+            if len(kp) == 12:
+                self.by_key[kp] = name
 
     # -- radio out
-    async def say(self, text: str) -> None:
+    async def say(self, text: str, dest: Optional[str] = None) -> None:
+        """Send one mesh message: to the channel, or as a DM to `dest`."""
         async with self.radio_lock:
-            r = await self.mc.commands.send_chan_msg(self.chan, text)
-            if r.type == EventType.ERROR:
-                log.error("send_chan_msg failed: %s", r.payload)
+            if dest is None:
+                if self.chan is None:
+                    log.error("no channel configured; dropped %r", text[:40])
+                    return
+                r = await self.mc.commands.send_chan_msg(self.chan, text)
+                if r.type == EventType.ERROR:
+                    log.error("send_chan_msg failed: %s", r.payload)
+            else:
+                r = await self.mc.commands.send_msg_with_retry(dest, text)
+                if r is None or r.type == EventType.ERROR:
+                    log.error("DM to %s not acknowledged: %r", dest, text[:40])
             await asyncio.sleep(self.cfg["paging"]["gap_s"])
 
     async def page_out(self, st: UserState) -> None:
@@ -320,11 +410,11 @@ class Bridge:
             if i == len(batch) - 1 and st.pending:
                 tag = f"\n[M=more, {len(st.pending)} left]"
                 if len(c) + len(tag) > p["chunk_chars"]:
-                    await self.say(c)
+                    await self.say(c, st.dest)
                     c = tag.strip()
                 else:
                     c += tag
-            await self.say(c)
+            await self.say(c, st.dest)
 
     def output_handler(self, name: str, st: UserState):
         async def handler(text: str, closed: bool) -> None:
@@ -333,7 +423,7 @@ class Bridge:
                 st.session = None
             if not text:
                 return
-            log.info("[%s] -> %d chars", name, len(text))
+            log.info("[%s] -> %d chars (%s)", name, len(text), st.dest or "channel")
             new = chunk_text(text, self.cfg["paging"]["chunk_chars"])
             # Output that arrives while earlier pages wait is queued behind them.
             if st.pending:
@@ -346,25 +436,39 @@ class Bridge:
     # -- radio in
     async def on_channel(self, ev) -> None:
         p = ev.payload or {}
-        if p.get("channel_idx") != self.chan:
+        if self.chan is None or p.get("channel_idx") != self.chan:
             return
         raw = str(p.get("text", ""))
         name, sep, body = raw.partition(": ")
         if not sep:
             log.info("ignored channel text with no sender: %r", raw[:60])
             return
-        user = self.cfg["users"].get(name)
-        if not user:
-            log.warning("ignored %r: sender %r not in users", body[:40], name)
+        if name not in self.cfg["users"]:
+            log.warning("ignored channel %r: sender %r not in users", body[:40], name)
             return
-        log.info("[%s] <- %r", name, body)
+        await self.dispatch(name, None, body)
+
+    async def on_dm(self, ev) -> None:
+        p = ev.payload or {}
+        kp = key_prefix(p.get("pubkey_prefix", ""))
+        body = str(p.get("text", ""))
+        name = self.by_key.get(kp)
+        if not name:
+            log.warning("ignored DM %r from unlisted key %s - add it as \"pubkey\" "
+                        "to a user to allow it", body[:40], kp)
+            return
+        await self.dispatch(name, kp, body)
+
+    async def dispatch(self, name: str, dest: Optional[str], body: str) -> None:
+        log.info("[%s] <- %r via %s", name, body, dest or "channel")
         st = self.users.setdefault(name, UserState())
         try:
             async with st.lock:
-                await self.handle(name, user, body.strip())
+                st.dest = dest              # reply the way they came in
+                await self.handle(name, self.cfg["users"][name], body.strip())
         except Exception as e:
             log.exception("[%s] handling %r failed", name, body)
-            await self.say(f"Bridge error: {type(e).__name__}: {str(e)[:70]}")
+            await self.say(f"Bridge error: {type(e).__name__}: {str(e)[:70]}", dest)
 
     async def handle(self, name: str, user: Dict, body: str) -> None:
         st = self.users[name]
@@ -382,7 +486,7 @@ class Bridge:
                 log.exception("[%s] node login failed", name)
                 await st.session.close()
                 st.session = None
-                await self.say(f"Node unreachable: {str(e)[:80]}")
+                await self.say(f"Node unreachable: {str(e)[:80]}", st.dest)
                 return
             fresh = True
         if fresh and body.upper() in GREETINGS:
@@ -403,7 +507,20 @@ class Bridge:
                     st.session = None
                     st.pending = []
                     await s.close()
-                    await self.say(f"{name}: disconnected after {limit // 60} min idle.")
+                    await self.say(f"{name}: disconnected after {limit // 60} min idle.", st.dest)
+
+    async def advertiser(self) -> None:
+        hours = self.cfg["adverts"].get("flood_every_h") or 0
+        while True:
+            async with self.radio_lock:
+                r = await self.mc.commands.send_advert(flood=True)
+                if r.type == EventType.ERROR:
+                    log.error("advert failed: %s", r.payload)
+                else:
+                    log.info("flood advert sent")
+            if hours <= 0:
+                return
+            await asyncio.sleep(hours * 3600)
 
     async def run(self) -> None:
         r = self.cfg["radio"]
@@ -411,16 +528,20 @@ class Bridge:
         if self.mc is None:
             raise ConnectionError(f"no MeshCore companion on {r['port']}")
         self.mc.subscribe(EventType.CHANNEL_MSG_RECV, self.on_channel)
+        self.mc.subscribe(EventType.CONTACT_MSG_RECV, self.on_dm)
         await self.mc.start_auto_message_fetching()
-        log.info("Listening on %s channel %d for %s", r["port"], self.chan,
+        log.info("Listening on %s: channel %s, DMs from %d listed key(s); users: %s",
+                 r["port"], self.chan, len(self.by_key),
                  ", ".join(self.cfg["users"]) or "(nobody)")
-        reaper = asyncio.create_task(self.idle_reaper())
+        tasks = [asyncio.create_task(self.idle_reaper()),
+                 asyncio.create_task(self.advertiser())]
         try:
             while self.mc.is_connected:
                 await asyncio.sleep(5)
             log.error("radio disconnected")
         finally:
-            reaper.cancel()
+            for t in tasks:
+                t.cancel()
             for st in self.users.values():
                 if st.session:
                     await st.session.close()

@@ -1,8 +1,9 @@
 # bpq-meshcore
 
 Use your BPQ32 / LinBPQ node from **MeshCore**: from the MeshCore phone app,
-a T-Deck, or any MeshCore companion. Messages on a private MeshCore channel are
-relayed into your node over telnet, as the sender's own callsign. Users land at
+a T-Deck, or any MeshCore companion. **Direct messages** to the bridge radio
+(private per user, identified by public key), or posts on a private channel,
+are relayed into your node over telnet, as the sender's own callsign. Users land at
 the node prompt and get exactly what a telnet user gets: `BBS`, `CHAT`,
 your node applications, and the BBS's own commands once inside it.
 
@@ -89,7 +90,44 @@ Edit `meshcore_config.json`:
 - `bbs.port` is your telnet `TCPPORT`.
 - Each key under `users` is the sender's **MeshCore name**, exactly as it
   appears before the colon in their channel messages.
-- Messages from names not on the list are ignored and logged.
+- `"pubkey"` (the first 12 or more hex characters of their public key) lets
+  that user **DM** the bridge. This is the recommended way in: a DM is private
+  to that user, and only the holder of the key can send it.
+- Messages from names or keys not on the list are ignored and logged. An
+  unknown DM is logged as `ignored DM ... from unlisted key 05df63593866`,
+  which is the easiest way to get a new user's key: they DM `hi`, you copy
+  the key from the log.
+- Set `"channel": {"index": null}` to accept DMs only.
+
+### Adding a DM user
+
+1. They send a **flood advert** from their MeshCore device. The bridge radio
+   can only decrypt DMs from a contact it has heard advertise.
+2. They add your bridge as a contact. It floods its own advert at start and
+   every `adverts.flood_every_h` hours (default 12).
+3. They DM `hi`. You copy their key from the log into their `"pubkey"`, give
+   them a telnet `USER=` line, and restart the bridge (and BPQ, for the new
+   USER line).
+
+### What the mesh sees (`display`, all optional)
+
+```json
+"display": {
+  "node_prefix": "N0CALL",
+  "command_sep": "|",
+  "welcome": ["Welcome to the N0CALL-8 Mesh to BPQ Gateway.", "Send ? for commands"]
+}
+```
+
+- `node_prefix` replaces BPQ's `ALIAS:CALL-8} ` in front of node replies. Use
+  `""` to remove it.
+- `command_sep` joins the `?` command list, so 17 commands fit in one
+  message: `N0CALL BBS|CHAT|…|MHEARD`.
+- `welcome` is sent instead of the telnet port's CTEXT.
+
+These change only what the mesh sees. Telnet and RF users are unaffected. A
+line too long for one message carries on in the next one, which starts with
+`(cont)`.
 
 Then:
 
@@ -136,9 +174,7 @@ settings in `meshcore_config.json` (`paging`, `bbs.quiet_s`,
 
 ## Roadmap
 
-- Direct-message sessions keyed by the sender's public key. Those are
-  authenticated, so they're better for several users than a shared channel,
-  where everyone sees every session.
+- A one-time reply to unlisted DM senders telling them how to register.
 - A one-time new-mail notice for listed users.
 
 ## Files
