@@ -143,6 +143,13 @@ Edit `meshcore_config.json`:
 - `NODE` typed at the node itself (the app already ended, or the session
   timed out) shows the node's command list. BPQ would otherwise read it as
   `NODES` and list every node heard.
+- `join_after` drops a blank line that follows a line starting with one of
+  these, e.g. `["Source:"]` so a WX report's forecast follows its header.
+- `telnet_only` (its own block, not under `display`): commands that move
+  files or speak a binary protocol (`YAPP` in the BBS, `RMS` at the node,
+  `GRIB`/`YAPP`/`FILE`/`DL` in WX) get `Use Telnet or RF to use this
+  feature.` instead of being passed on. Keyed by `NODE`, `BBS` or an app's
+  command name, matched on the first word.
 
 These change only what the mesh sees. Telnet and RF users are unaffected. A
 line too long for one message carries on in the next one, which starts with

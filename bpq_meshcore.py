@@ -66,14 +66,25 @@ DEFAULT_CONFIG = {
     "paging": {"chunk_chars": 118, "chunks_per_reply": 4, "gap_s": 2.5,
                "max_pages": 5},
     "adverts": {"flood_every_h": 12},
+    # Commands that move files or speak a binary protocol, which a mesh text
+    # message cannot carry. Keyed by where the user is: "NODE", "BBS" or an
+    # application's command name; matched on the first word typed. The
+    # bridge answers `message` instead of passing them on.
+    "telnet_only": {
+        "message": "Use Telnet or RF to use this feature.",
+        "commands": {"NODE": ["RMS"], "BBS": ["YAPP"],
+                     "WX": ["GRIB", "YAPP", "FILE", "DL"]},
+    },
     # Mesh-only rewrites of what BPQ sends (telnet/RF users are unaffected).
     #   node_prefix: replaces "ALIAS:CALL} " at the start of node replies;
     #                "" removes it, null leaves it alone.
     #   command_sep: joins the node's "?" command list, e.g. "|"; null = as is.
     #   welcome:     lines sent instead of the telnet CTEXT; [] = send CTEXT.
+    #   join_after:  a blank line right after a line starting with one of
+    #                these is dropped, e.g. ["Source:"] for the WX report.
     "display": {"node_prefix": None, "command_sep": None, "welcome": [],
                 "compact_lists": False, "bbs_prompt": None,
-                "menu_on_return": False, "app_names": None},
+                "menu_on_return": False, "app_names": None, "join_after": []},
     "users": {
         "N0CALL-Phone": {
             "pubkey": "",   # their public key (12+ hex chars) to allow DMs
@@ -122,7 +133,8 @@ def load_config() -> Dict:
         log.error("%s is not valid JSON: line %d col %d: %s\n    %s",
                   CONFIG_FILE.name, e.lineno, e.colno, e.msg, line)
         sys.exit(1)
-    for k in ("radio", "channel", "bbs", "paging", "adverts", "display"):
+    for k in ("radio", "channel", "bbs", "paging", "adverts", "display",
+              "telnet_only"):
         cfg[k] = {**DEFAULT_CONFIG[k], **cfg.get(k, {})}
     cfg.setdefault("users", {})
     return cfg
@@ -235,8 +247,11 @@ def mesh_format(text: str, display: Dict) -> str:
     sep = display.get("command_sep")
     compact = display.get("compact_lists")
     bbs_prompt = display.get("bbs_prompt")
+    join = tuple(display.get("join_after") or ())
     out = []
     for line in text.split("\n"):
+        if join and line == "" and out and out[-1].startswith(join):
+            continue
         if display.get("menu_on_return") and _RETURNED.match(line):
             continue
         if bbs_prompt and _BBS_PROMPT.match(line):
@@ -316,6 +331,7 @@ class NodeSession:
         self.pump_task: Optional[asyncio.Task] = None
         self.in_bbs = False
         self.in_app = False   # inside the BBS or an application, not at the node
+        self.app = "NODE"     # where the user is: NODE, BBS or the app's command
         self.held = ""      # text kept back to go out with the node's "?" list
 
     async def _read_until(self, needle: bytes, timeout: float) -> bytes:
@@ -393,11 +409,16 @@ class NodeSession:
         if _CONNECTED_BBS.search(plain):
             self.in_bbs = True
         lines = plain.split("\n")
-        if self.in_bbs or any(_CONNECTED_APP.match(l) for l in lines):
-            self.in_app = True
+        for l in lines:
+            m = _CONNECTED_APP.match(l)
+            if m:
+                self.in_app, self.app = True, m[1].upper()
+        if self.in_bbs:
+            self.in_app, self.app = True, "BBS"
         returned = any(_RETURNED.match(l) for l in lines)
         if returned:
             self.in_bbs = self.in_app = False
+            self.app = "NODE"
         text = mesh_format(plain, self.display)
         if "invalid" in text.lower() and "password" in text.lower():
             log.error("[%s] BPQ rejected the telnet login", self.label)
@@ -600,6 +621,12 @@ class Bridge:
             fresh = True
         if fresh and body.upper() in GREETINGS:
             return                      # the node's welcome text is the reply
+        word = (body.split() or [""])[0].upper()
+        blocked = self.cfg["telnet_only"]["commands"].get(st.session.app, [])
+        if word in (w.upper() for w in blocked):
+            log.info("[%s] %r is telnet-only (in %s)", name, body, st.session.app)
+            await self.say(self.cfg["telnet_only"]["message"], st.dest)
+            return
         if body.upper() == "NODE" and not st.session.in_app:
             # Already at the node (the app ended, or the session timed out).
             # BPQ would read NODE as NODES and list every node heard.
