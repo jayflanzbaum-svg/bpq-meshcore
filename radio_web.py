@@ -350,6 +350,15 @@ class RadioWeb:
             v = bool(a["manual_add"])
             _ok(await self._cmd(lambda mc: mc.commands.set_manual_add_contacts(v)))
             done.append("auto-add")
+        if a.get("path_hash_mode") is not None:
+            m = int(a["path_hash_mode"])
+            if m not in (0, 1, 2):
+                raise ApiError(400, "path hash size must be 1, 2 or 3 bytes")
+            _ok(await self._cmd(lambda mc: mc.commands.set_path_hash_mode(m)))
+            dq = await self._cmd(lambda mc: mc.commands.send_device_query())
+            if dq is not None and dq.type != EventType.ERROR:
+                self.device = dq.payload
+            done.append(f"path hash {m + 1} byte(s)")
         if a.get("radio"):
             r = a["radio"]
             if a.get("confirm") != "CHANGE RADIO":

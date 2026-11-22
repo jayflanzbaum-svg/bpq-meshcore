@@ -169,6 +169,11 @@ pre.out { background: var(--bg); border: 1px solid var(--line); border-radius: 6
       <label class="f" style="flex-direction:row;align-items:center;gap:6px">
         <input type="checkbox" id="sAuto"> Auto-add contacts from adverts (the gateway's guest tier needs this on)</label>
     </div>
+    <div class="row" style="margin-top:10px">
+      <label class="f">Path hash size
+        <select id="sHash"><option value="0">1 byte</option><option value="1">2 bytes</option><option value="2">3 bytes</option></select></label>
+      <span class="meta" style="margin-top:14px">Bytes per hop in routes. Older repeaters (before about v1.14) only handle 1 byte.</span>
+    </div>
   </div>
   <div class="card">
     <h2>Adverts and clock</h2>
@@ -416,6 +421,7 @@ function renderInfo(fillForm) {
     ["TX power", me.tx_power != null && `${me.tx_power} dBm (max ${me.max_tx_power})`],
     ["Position", me.adv_lat ? `${me.adv_lat.toFixed(5)}, ${me.adv_lon.toFixed(5)}` : "not set"],
     ["Auto-add contacts", me.manual_add_contacts === undefined ? "" : me.manual_add_contacts ? "off" : "on"],
+    ["Path hash", d.path_hash_mode != null && (d.path_hash_mode + 1) + " byte" + (d.path_hash_mode ? "s" : "")],
     ["Max contacts / channels", d.max_contacts && `${d.max_contacts} / ${d.max_channels}`],
     ["Battery", b.level != null ? (b.level > 100 ? (b.level/1000).toFixed(2) + " V" : b.level + "%") : ""],
     ["Storage", b.used_kb != null && `${b.used_kb} of ${b.total_kb} KB`],
@@ -431,7 +437,7 @@ function renderInfo(fillForm) {
   if (fillForm || !renderInfo.filled) if (me.name) {
     renderInfo.filled = true;
     $("#sName").value = me.name; $("#sLat").value = me.adv_lat || ""; $("#sLon").value = me.adv_lon || "";
-    $("#sTx").value = me.tx_power; $("#sTx").max = me.max_tx_power; $("#sAuto").checked = !me.manual_add_contacts;
+    if (d.path_hash_mode != null) $("#sHash").value = d.path_hash_mode; $("#sTx").value = me.tx_power; $("#sTx").max = me.max_tx_power; $("#sAuto").checked = !me.manual_add_contacts;
     $("#rFreq").value = me.radio_freq; $("#rBw").value = me.radio_bw; $("#rSf").value = me.radio_sf; $("#rCr").value = me.radio_cr;
   }
 }
@@ -442,10 +448,12 @@ $("#sSave").onclick = () => {
   if ($("#sLat").value != (me.adv_lat || "") || $("#sLon").value != (me.adv_lon || "")) { body.lat = $("#sLat").value; body.lon = $("#sLon").value; }
   if (+$("#sTx").value !== me.tx_power) body.tx_power = +$("#sTx").value;
   if ($("#sAuto").checked === !!me.manual_add_contacts) body.manual_add = !$("#sAuto").checked;
+  if (S.device && S.device.path_hash_mode != null && +$("#sHash").value !== S.device.path_hash_mode) body.path_hash_mode = +$("#sHash").value;
   if (!Object.keys(body).length) return toast("Nothing changed");
   act($("#sSave"), () => api("settings", body), r => "Saved: " + r.changed.join(", ")).then(() => loadState().then(() => renderInfo(true)));
 };
 $("#sAuto").onchange = () => $("#sSave").click();
+$("#sHash").onchange = () => $("#sSave").click();
 $("#advZero").onclick = e => act(e.target, () => api("advert", {flood: false}), "Zero-hop advert sent");
 $("#advFlood").onclick = e => act(e.target, () => api("advert", {flood: true}), "Flood advert sent");
 $("#syncTime").onclick = e => act(e.target, () => api("sync-time", {}), "Radio clock set");
