@@ -68,7 +68,12 @@ DEFAULT_CONFIG = {
     },
     # max_pages: most pages one command may send (0 = no cap); the rest is
     #            dropped with a hint to ask for less.
+    # ack_wait_s / dm_attempts: how long one DM waits for its ACK and how many
+    # tries (the last one flooded). Multi-hop ACKs often get lost even when the
+    # message arrived, and the radio's own suggested wait (x3 tries) held each
+    # part of a reply for 20-35 s.
     "paging": {"chunk_chars": 118, "chunks_per_reply": 4, "gap_s": 2.5,
+               "ack_wait_s": 8, "dm_attempts": 3,
                "max_pages": 5},
     "adverts": {"flood_every_h": 12},
     # Local web page for managing the radio (the bridge holds the USB port,
@@ -85,8 +90,12 @@ DEFAULT_CONFIG = {
     "guests": {
         "enabled": False,
         "host": "127.0.0.1",
-        "apps": {"WX": 63051, "SPOTS": 63050, "RPTSRCH": 63052, "DIRECTIONS": 63053},
-        "member_apps": {"OPENAI": 7373, "OFFGRIDAI": 7374},
+        "apps": {"WX": 63051, "SPOTS": 63050, "RPTSRCH": 63052, "DIRECTIONS": 63053,
+                 "OFFGRIDAI": 7374},
+        "member_apps": {"OPENAI": 7373},
+        # What a guest gets for BBS (they cannot log in to it).
+        "bbs_info": ("The BBS is a ham radio mailbox: mail and bulletins that reach hams "
+                     "nationwide, plus Winlink email. Hams: send MYCALL <callsign>."),
         "labels": {"WX": "Weather", "SPOTS": "Band activity", "RPTSRCH": "Repeaters",
                    "DIRECTIONS": "Directions", "OPENAI": "AI", "OFFGRIDAI": "Offgrid AI"},
         "title": "Mesh to BPQ Gateway",
@@ -232,6 +241,16 @@ def trim_for_mesh(s: str) -> str:
 
 
 CONT = "(cont) "
+MSG_MAX = 140   # bytes in one mesh text message (part marker and notes included)
+
+
+def number_parts(chunks: List[str]) -> List[str]:
+    """"... (1/3)", "... (2/3)" when a reply takes more than one message, so
+    the reader knows more is on the way."""
+    n = len(chunks)
+    if n < 2:
+        return chunks
+    return [f"{c} ({i}/{n})" for i, c in enumerate(chunks, 1)]
 _NODE_PREFIX = re.compile(r"^[A-Z0-9#]{1,6}:[A-Z0-9]{1,6}(?:-\d{1,2})?\} ")
 
 # A BPQMail message-list line (L, LM, LL, LB ...):
@@ -586,6 +605,8 @@ class Bridge:
         self.radio_lock = asyncio.Lock()   # one radio: sends go out in order
         self.chan = cfg["channel"].get("index")
         self.members = load_members()
+        self.seen_dm = {}                  # (key, sender time, text) -> when seen
+        self.greeted = set()               # guests already given the welcome
         self.by_key = {}
         for name, u in cfg["users"].items():
             kp = key_prefix(u.get("pubkey", ""))
@@ -607,7 +628,10 @@ class Bridge:
                     self.web.record("out", "chan", text, channel=self.chan,
                                     name="(bridge)", via="bridge")
             else:
-                r = await self.mc.commands.send_msg_with_retry(dest, text)
+                p = self.cfg["paging"]
+                r = await self.mc.commands.send_msg_with_retry(
+                    dest, text, max_attempts=p["dm_attempts"], flood_after=1,
+                    timeout=p["ack_wait_s"])
                 acked = not (r is None or r.type == EventType.ERROR)
                 if not acked:
                     log.error("DM to %s not acknowledged: %r", dest, text[:40])
@@ -621,11 +645,12 @@ class Bridge:
         p = self.cfg["paging"]
         n = p["chunks_per_reply"]
         batch, st.pending = st.pending[:n], st.pending[n:]
+        batch = number_parts(batch)       # ... (1/3) counts this page only
         for i, c in enumerate(batch):
             if i == len(batch) - 1 and st.pending:
                 pages = -(-len(st.pending) // n)  # one page = one M reply
                 tag = f"\n[M=More, {pages} page{'s' if pages != 1 else ''} left]"
-                if len(c) + len(tag) > p["chunk_chars"]:
+                if len((c + tag).encode()) > MSG_MAX:
                     await self.say(c, st.dest)
                     c = tag.strip()
                 else:
@@ -704,6 +729,14 @@ class Bridge:
             # The sysop is chatting with this contact on the radio page.
             log.info("DM %r from %s is for the radio page (talk mode)", body[:40], kp)
             return
+        # A sender whose ACK got lost retries the same message; answer it once.
+        now = time.time()
+        self.seen_dm = {k: t for k, t in self.seen_dm.items() if now - t < 300}
+        dup = (kp, p.get("sender_timestamp"), body)
+        if dup in self.seen_dm:
+            log.info("duplicate DM %r from %s ignored (sender retry)", body[:40], kp)
+            return
+        self.seen_dm[dup] = now
         name = self.by_key.get(kp)
         if not name:
             if self.cfg["guests"].get("enabled") and len(kp) == 12:
@@ -774,7 +807,9 @@ class Bridge:
     # -- guests and members
     async def reply(self, text: str, dest: Optional[str]) -> None:
         """say(), split to the mesh message size like node output is."""
-        for c in chunk_text(text, self.cfg["paging"]["chunk_chars"]):
+        # Not paged (no M=More note), so a message can be nearly full: room is
+        # left only for the " (1/2)" marker.
+        for c in number_parts(chunk_text(text, MSG_MAX - 8)):
             await self.say(c, dest)
 
     def member(self, kp: str) -> Optional[Dict]:
@@ -790,8 +825,11 @@ class Bridge:
 
     def guest_menu(self, kp: str) -> str:
         g = self.cfg["guests"]
-        labels = {k.upper(): v for k, v in g["labels"].items()}
-        apps = "|".join(f"{a}={labels.get(a, a)}" for a in self.guest_apps(kp))
+        # The same look as the node's "?" list for users: "N4SFL: WX | SPOTS".
+        d = self.cfg["display"]
+        sep = d.get("command_sep") or " | "
+        prefix = d.get("node_prefix")
+        apps = (prefix + " " if prefix else "") + sep.join([*self.guest_apps(kp), "BBS"])
         m = self.members.get(kp) or {}
         if m.get("status") == "approved":
             head = f"{g['title']} - {m['callsign']}"
@@ -800,9 +838,9 @@ class Bridge:
             head = f"{g['title']} - guest"
             tail = f"\n{m['callsign']} is waiting for sysop approval."
         else:
-            head = f"{g['title']} - guest"
-            tail = "\nHam? Send CALL <callsign> for more."
-        return f"{head}\n{apps}{tail}\n[?=Commands, BYE=Log off]"
+            head = ""                     # a plain guest: the list says it all
+            tail = "\nSend MYCALL <callsign> for more."
+        return (f"{head}\n" if head else "") + f"{apps}{tail}\n[?=Commands, BYE=Log off]"
 
     async def dispatch_guest(self, kp: str, body: str) -> None:
         m = self.member(kp)
@@ -818,6 +856,12 @@ class Bridge:
             await self.reply(f"Bridge error: {type(e).__name__}: {str(e)[:70]}", kp)
 
     async def handle_guest(self, name: str, kp: str, st: UserState, body: str) -> None:
+        if kp not in self.greeted:
+            # First text from this radio, whatever it said: welcome and menu.
+            self.greeted.add(kp)
+            await self.reply(f"Welcome to {self.cfg['guests']['title']}!\n"
+                             + self.guest_menu(kp), kp)
+            return
         if body.upper() == "M" and st.pending:
             await self.page_out(st)
             return
@@ -838,7 +882,7 @@ class Bridge:
             await self.reply(self.guest_menu(kp), kp)
         elif word in ("BYE", "Q", "QUIT", "EXIT"):
             await self.reply("73! Send anything to come back.", kp)
-        elif word == "CALL":
+        elif word in ("MYCALL", "CALL"):
             await self.signup(name, kp, body.split()[1:])
         elif word in apps:
             st.close_note = self.guest_menu(kp)
@@ -850,16 +894,18 @@ class Bridge:
                 log.warning("[%s] app %s unreachable: %s", name, word, e)
                 st.session = None
                 await self.reply(f"{word} is offline right now. Try again later.", kp)
-        elif word in ("BBS", "CHAT", "CONNECT", "C", "RMS"):
+        elif word == "BBS":
+            await self.reply(self.cfg["guests"]["bbs_info"], kp)
+        elif word in ("CHAT", "CONNECT", "C", "RMS"):
             await self.reply(f"{word} is for licensed hams with a node login. "
-                           "Send CALL <callsign> to ask.", kp)
+                           "Send MYCALL <callsign> to ask.", kp)
         else:
             await self.reply(f"Unknown command {word[:12]}.\n" + self.guest_menu(kp), kp)
 
     async def signup(self, name: str, kp: str, args: List[str]) -> None:
         call = (args[0] if args else "").upper()
         if not _CALLSIGN.match(call):
-            await self.reply("Send CALL and your callsign, e.g. CALL N0XYZ.", kp)
+            await self.reply("Send MYCALL and your callsign, e.g. MYCALL N0XYZ.", kp)
             return
         m = self.members.get(kp) or {}
         if m.get("status") == "approved":
