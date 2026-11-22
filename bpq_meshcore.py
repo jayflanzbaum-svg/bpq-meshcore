@@ -700,6 +700,10 @@ class Bridge:
             return
         kp = key_prefix(p.get("pubkey_prefix", ""))
         body = str(p.get("text", ""))
+        if self.web and self.web.talking(kp):
+            # The sysop is chatting with this contact on the radio page.
+            log.info("DM %r from %s is for the radio page (talk mode)", body[:40], kp)
+            return
         name = self.by_key.get(kp)
         if not name:
             if self.cfg["guests"].get("enabled") and len(kp) == 12:

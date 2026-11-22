@@ -102,6 +102,13 @@ svg.i { width: 22px; height: 22px; fill: currentColor; flex: none; }
 .msg .t { white-space: pre-wrap; word-break: break-word; }
 .msg .m { font-size: 11px; color: var(--muted); text-align: right; margin-top: 2px; }
 .msg.gw { opacity: .8; }
+.msg { cursor: pointer; }
+.hops { padding: 4px 16px 10px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.hop { background: var(--surface2); border-radius: 10px; padding: 2px 8px; font-size: 12px; }
+.hop .mono { color: var(--muted); }
+.heardrow { display: flex; justify-content: space-between; gap: 10px; padding: 6px 16px; border-bottom: 1px dashed var(--line); font-size: 13px; }
+.heardrow small { color: var(--muted); display: block; }
+.msgtext { margin: 4px 16px 8px; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
 .composer { display: flex; gap: 8px; padding: 8px 10px; background: var(--surface); border-top: 1px solid var(--line); align-items: center; }
 .composer input { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 22px;
   padding: 10px 16px; font: inherit; outline: none; }
@@ -114,6 +121,9 @@ svg.i { width: 22px; height: 22px; fill: currentColor; flex: none; }
 #chatHead b { display: block; }
 #chatHead small { color: var(--muted); }
 #chatNone { flex: 1; display: grid; place-items: center; color: var(--muted); }
+#talkBar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-size: 13px;
+  background: var(--surface2); border-bottom: 1px solid var(--line); }
+#talkBar .toggle { flex: 1; min-width: 0; margin: 0; }
 
 @media (min-width: 900px) {
   #v-chats.on { display: grid; grid-template-columns: 340px 1fr; overflow: hidden; }
@@ -177,6 +187,14 @@ pre.out { margin: 8px 16px 0; background: var(--bg); border: 1px solid var(--lin
 #map { position: absolute; inset: 0; }
 .legend { position: absolute; z-index: 500; left: 10px; bottom: 10px; background: var(--surface); border-radius: 8px;
   padding: 6px 10px; box-shadow: var(--shadow); font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+.mapbar { position: absolute; z-index: 500; left: 54px; right: 10px; top: 10px; display: flex; gap: 6px; flex-wrap: wrap; pointer-events: none; }
+.mapbar > * { pointer-events: auto; box-shadow: var(--shadow); }
+.mapbar .grow { flex: 1; box-shadow: none; pointer-events: none; }
+.mapnote { position: absolute; z-index: 500; left: 50%; transform: translateX(-50%); top: 52px; background: var(--surface);
+  border-radius: 8px; padding: 6px 12px; box-shadow: var(--shadow); font-size: 13px; }
+.leaflet-popup-content .pbtns { display: flex; gap: 6px; margin-top: 6px; }
+.leaflet-popup-content .pbtns button { border: 1px solid #ccc; background: #fff; border-radius: 12px; padding: 3px 10px; cursor: pointer; font: inherit; }
+.leaflet-popup-content .place { color: #666; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
 .fab { position: absolute; right: 18px; bottom: 18px; width: 54px; height: 54px; border-radius: 16px; border: 0;
   background: var(--accent); cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,.25); display: grid; place-items: center; }
@@ -232,6 +250,7 @@ pre.out { margin: 8px 16px 0; background: var(--bg); border: 1px solid var(--lin
     </div></div>
     <div id="chat">
       <div id="chatHead" hidden><div id="chatAv"></div><div class="body"><b id="chatName"></b><small id="chatSub" class="mono"></small></div></div>
+      <div id="talkBar" hidden><label class="toggle"><span class="switch"><input type="checkbox" id="talkSw"><span></span></span><span id="talkText"></span></label></div>
       <div id="chatNone">Pick a chat</div>
       <div id="feed" hidden></div>
       <div class="composer" id="composer" hidden>
@@ -247,6 +266,7 @@ pre.out { margin: 8px 16px 0; background: var(--bg); border: 1px solid var(--lin
     <div class="tools" id="cChips">
       <button class="chip on" data-f="">All</button><button class="chip" data-f="1">Companions</button>
       <button class="chip" data-f="2">Repeaters</button><button class="chip" data-f="3">Rooms</button><button class="chip" data-f="4">Sensors</button>
+      <button class="chip" id="cMap" title="Show the contacts in this filter on the map">Show on map</button>
       <select id="cSort" class="chip" style="margin-left:auto"><option value="heard">Last heard</option><option value="name">Name</option></select>
     </div>
     <div class="count" id="cCount"></div>
@@ -262,6 +282,11 @@ pre.out { margin: 8px 16px 0; background: var(--bg); border: 1px solid var(--lin
   </section>
 
   <section class="view" id="v-map"><div id="map"></div>
+    <div class="mapbar" id="mapChips">
+      <button class="chip on" data-mf="">All</button><button class="chip" data-mf="1">Companions</button>
+      <button class="chip" data-mf="2">Repeaters</button><button class="chip" data-mf="3">Rooms</button><button class="chip" data-mf="4">Sensors</button>
+      <span class="grow"></span><button class="chip" id="mapSetMe">Set my position</button></div>
+    <div class="mapnote" id="mapNote" hidden></div>
     <div class="legend"><span><i style="background:var(--t-companion)"></i>Companion</span><span><i style="background:var(--t-repeater)"></i>Repeater</span>
       <span><i style="background:var(--t-room)"></i>Room</span><span><i style="background:var(--t-sensor)"></i>Sensor</span><span><i style="background:#e5534b"></i>This radio</span></div>
   </section>
@@ -269,8 +294,10 @@ pre.out { margin: 8px 16px 0; background: var(--bg); border: 1px solid var(--lin
   <section class="view" id="v-settings"><div class="wrap">
     <div class="card"><h3>Identity</h3>
       <div class="row"><div class="lbl">Name</div><input id="sName" style="width:220px"></div>
-      <div class="row"><div class="lbl">Position<small>Shared in adverts. 0, 0 keeps the radio off maps.</small></div>
+      <div class="row"><div class="lbl">Position<small>0, 0 means not set. You can also set it from the map.</small></div>
         <input id="sLat" placeholder="Lat" style="width:110px"><input id="sLon" placeholder="Lon" style="width:110px"></div>
+      <div class="row"><div class="lbl">Share position in adverts<small>Off: only this page knows it. On: other radios see this station on their maps.</small></div>
+        <label class="switch"><input type="checkbox" id="sShare"><span></span></label></div>
       <div class="btns"><button class="btn pri" id="sSaveId">Save identity</button><button class="btn" id="sHere">Use this PC's location</button></div>
     </div>
     <div class="card"><h3>Radio</h3>
@@ -322,7 +349,7 @@ const TYPES = {1: ["Companion", "i-person", "--t-companion"], 2: ["Repeater", "i
                3: ["Room server", "i-room", "--t-room"], 4: ["Sensor", "i-sensor", "--t-sensor"]};
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const wide = () => innerWidth >= 900;
-let S = {}, contacts = [], channels = [], msgs = [], lastId = 0, stats = {}, conv = null, view = "chats", cFilter = "";
+let S = {}, contacts = [], channels = [], msgs = [], lastV = 0, stats = {}, conv = null, view = "chats", cFilter = "";
 let seen = {}; try { seen = JSON.parse(localStorage.getItem("seen") || "{}"); } catch (e) {}
 const saveSeen = () => { try { localStorage.setItem("seen", JSON.stringify(seen)); } catch (e) {} };
 
@@ -392,7 +419,7 @@ async function loadState() {
   $("#status").innerHTML = S.connected
     ? `<span class="dot" style="background:#4ade80"></span>Connected · ${esc(S.port)}${me.radio_freq ? ` · ${me.radio_freq} MHz · SF${me.radio_sf} · ${me.tx_power} dBm` : ""}`
     : `<span class="dot" style="background:#f87171"></span>${esc(S.err || "Radio not connected")}`;
-  setTitle(); if (view === "gateway") renderGateway();
+  setTitle(); renderTalk(); if (view === "gateway") renderGateway();
 }
 
 // ---------------- chats
@@ -405,7 +432,7 @@ function convLabel(k) {
 }
 // Gateway traffic: what the bridge sends, every DM it receives (all DMs to
 // this radio go to the gateway) and anything on its private channel.
-const isGw = m => m.via === "bridge" || (m.dir === "in" && m.kind === "dm") || (m.kind === "chan" && m.ch === S.bridge_channel && m.via !== "web");
+const isGw = m => m.via === "bridge" || (m.dir === "in" && m.kind === "dm" && !m.talk) || (m.kind === "chan" && m.ch === S.bridge_channel && m.via !== "web");
 function convs() {
   const by = {};
   for (const m of msgs) { const k = convKey(m); const c = by[k] ||= {k, last: null, unread: 0, gw: true};
@@ -437,9 +464,24 @@ function openChat(k) {
   $("#chatAv").innerHTML = avatar(convLabel(k), ct ? ct.type_id : 1, ch);
   $("#chatName").textContent = convLabel(k);
   $("#chatSub").textContent = ch == null ? (ct ? `${ct.type} · ${route(ct.hops)} · ` : "") + k.slice(3) : `slot ${ch}` + (ch === S.bridge_channel ? " · gateway private channel" : "");
-  go("chats"); renderFeed(true); renderConvs(); $("#msgText").focus();
+  go("chats"); renderFeed(true); renderConvs(); renderTalk(); $("#msgText").focus();
 }
-function closeChat() { conv = null; $("#v-chats").classList.remove("chatting"); $("#chatNone").hidden = false;
+// Talk mode: while the switch is on, the contact's replies come to this page
+// instead of starting a gateway (BBS) session. Switching it on, or sending a DM,
+// turns it on for 30 minutes; then it switches itself off.
+function renderTalk() {
+  const bar = $("#talkBar");
+  if (!conv || !conv.startsWith("dm:")) { bar.hidden = true; return; }
+  const t = S.talk || {}, kp = conv.slice(3).toLowerCase(), on = kp in t, left = t[kp];
+  bar.hidden = false; $("#talkSw").checked = on;
+  $("#talkText").textContent = !on ? "Replies go to the gateway (BBS)"
+    : `Replies come here, not to the gateway (${Math.ceil(left / 60)} min left)`;
+}
+$("#talkSw").onchange = e => { if (!conv) return;
+  const on = e.target.checked;
+  act(e.target, () => api("talk", {key: conv.slice(3), on}), on ? "Replies come here for 30 min" : "Handed back to the gateway")
+    .then(loadState); };
+function closeChat() { conv = null; $("#talkBar").hidden = true; $("#v-chats").classList.remove("chatting"); $("#chatNone").hidden = false;
   $("#feed").hidden = true; $("#composer").hidden = true; $("#chatHead").hidden = true; renderConvs(); setTitle(); }
 function renderFeed(jump) {
   if (!conv) return;
@@ -449,14 +491,16 @@ function renderFeed(jump) {
   feed.innerHTML = rows.map(m => {
     const d = dayOf(m.t), sep = d !== lastDay ? `<div class="day">${d}</div>` : ""; lastDay = d;
     const who = m.dir === "in" && m.kind === "chan" ? `<div class="who">${esc(m.name || "?")}</div>` : "";
-    const meta = [m.via === "bridge" ? "gateway" : "", m.snr != null ? "SNR " + m.snr : "",
+    const meta = [m.via === "bridge" ? "gateway" : "", m.talk ? "to you" : "", m.snr != null ? "SNR " + m.snr : "",
+      m.heard ? `heard ${m.heard.length}×` : "",
       m.hops != null && m.hops >= 0 && m.hops < 64 ? route(m.hops).toLowerCase() : "", clock(m.t),
       m.acked === false ? '<span class="bad">✕ not delivered</span>' : m.acked ? '<span class="good">✓✓</span>' : m.dir === "out" ? "✓" : ""].filter(Boolean).join(" · ");
-    return sep + `<div class="msg ${m.dir}${m.via === "bridge" ? " gw" : ""}">${who}<div class="t">${esc(m.text)}</div><div class="m">${meta}</div></div>`;
+    return sep + `<div class="msg ${m.dir}${m.via === "bridge" ? " gw" : ""}" data-mid="${m.id}" title="Details">${who}<div class="t">${esc(m.text)}</div><div class="m">${meta}</div></div>`;
   }).join("") || `<div class="empty">No messages yet.</div>`;
   if (jump || atBottom) feed.scrollTop = feed.scrollHeight;
   if (rows.length) { seen[conv] = Math.max(seen[conv] || 0, rows[rows.length - 1].id); saveSeen(); }
 }
+$("#feed").onclick = e => { const b = e.target.closest("[data-mid]"); if (b) msgSheet(+b.dataset.mid); };
 $("#msgText").oninput = e => $("#msgLen").textContent = new TextEncoder().encode(e.target.value).length + "/140";
 $("#msgText").onkeydown = e => { if (e.key === "Enter") $("#sendBtn").click(); };
 $("#sendBtn").onclick = () => {
@@ -465,13 +509,72 @@ $("#sendBtn").onclick = () => {
   const body = conv.startsWith("ch:") ? {channel: +conv.slice(3), text} : {to: (contactBy(conv.slice(3)) || {}).key || conv.slice(3), text};
   if (body.channel === S.bridge_channel && !confirm("This is the gateway's private channel. Everyone on it sees this. Send?")) return;
   act($("#sendBtn"), () => api("send", body), r => r.acked === false ? "Sent, but not delivered" : null)
-    .then(r => { if (r) { $("#msgText").value = ""; $("#msgLen").textContent = "0/140"; loadMessages(); } });
+    .then(r => { if (r) { $("#msgText").value = ""; $("#msgLen").textContent = "0/140"; loadMessages(); if (body.to) loadState(); } });
 };
 async function loadMessages() {
-  try { const r = await api("messages?since=" + lastId); if (!r.messages.length) return;
-    msgs.push(...r.messages); lastId = msgs[msgs.length - 1].id; if (msgs.length > 2000) msgs = msgs.slice(-2000);
+  try { const r = await api("messages?since=" + lastV);
+    if (r.ver < lastV) { msgs = []; lastV = 0; return loadMessages(); }   // the bridge restarted
+    lastV = r.ver ?? Math.max(lastV, ...r.messages.map(m => m.id));   // older bridge: ids only
+    if (!r.messages.length) return;
+    // New messages, and earlier ones with new details (repeats heard).
+    const pos = new Map(msgs.map((m, i) => [m.id, i]));
+    for (const m of r.messages) { const i = pos.get(m.id); if (i != null) msgs[i] = m; else msgs.push(m); }
+    if (msgs.length > 2000) msgs = msgs.slice(-2000);
     renderConvs(); renderFeed();
+    if (openMsg && r.messages.some(m => m.id === openMsg)) msgSheet(openMsg);
   } catch (e) {}
+}
+
+// ---------------- message details
+let openMsg = null;
+const hopsOf = (path, phs) => (path || "").match(new RegExp(`.{1,${(phs || 1) * 2}}`, "g")) || [];
+// A hop is the first bytes of a repeater's key. Name it when the contacts say who.
+function hopName(hex) {
+  const ms = contacts.filter(c => c.type_id !== 1 && c.key.startsWith(hex));
+  return ms.length ? ms.slice(0, 3).map(c => c.name).join(" or ") + (ms.length > 3 ? " …" : "") : "unknown repeater";
+}
+const pathHtml = (path, phs) => { const h = hopsOf(path, phs);
+  return h.length ? h.map(x => `<span class="hop">${esc(hopName(x))} <span class="mono">${x}</span></span>`).join(" › ") : ""; };
+const fmtTime = t => new Date(t * 1000).toLocaleString([], {month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit"});
+function msgSheet(id) {
+  const m = msgs.find(x => x.id === id); if (!m) return;
+  openMsg = id;
+  const chan = m.kind === "chan", out = m.dir === "out";
+  const chName = chan ? convLabel("ch:" + m.ch) : "", peer = chan ? null : contactBy((m.peer || "").slice(0, 12));
+  const who = out ? "This radio" + (m.via === "bridge" ? " (gateway)" : "") : chan ? m.name || "?" : convLabel("dm:" + (m.peer || "").slice(0, 12));
+  const sender = !out && chan ? contacts.find(c => c.name === m.name) : !out ? peer : null;
+  const hops = m.hops != null && m.hops >= 0 && m.hops < 64 ? m.hops : null;
+  const bytes = new TextEncoder().encode(m.text).length;
+  const kv = [
+    ["Type", chan ? `Channel post · ${chName}` : "Direct message"],
+    [out ? "From" : "From", who],
+    ["To", chan ? chName : out ? convLabel("dm:" + (m.peer || "").slice(0, 12)) : "This radio"],
+    [out ? "Sent" : "Received", fmtTime(m.t)],
+    ["Sender's clock", m.sent_ts && !out ? fmtTime(m.sent_ts) + (Math.abs(m.t - m.sent_ts) > 120 ? " (clock is off)" : "") : ""],
+    ["Route", (m.route ? m.route.toLowerCase() + " · " : "") + (hops == null ? (m.hops === 255 ? "direct" : "") : hops === 0 ? "direct, no repeaters" : `${hops} hop${hops > 1 ? "s" : ""}`)],
+    ["Signal (last hop)", [m.snr != null ? `SNR ${m.snr} dB` : "", m.rssi != null ? `RSSI ${m.rssi} dBm` : ""].filter(Boolean).join(" · ")],
+    ["Delivered", out && !chan ? (m.acked ? "yes, acknowledged" : m.acked === false ? "no acknowledgement" : "") : ""],
+    ["Repeats heard", out && chan && m.heard ? `${m.heard.length}` : ""],
+    ["Handled by", m.talk ? "you (talk mode)" : !out && !chan ? "gateway" : ""],
+    ["Size", `${bytes} of 140 bytes`],
+  ].filter(x => x[1]);
+  const path = pathHtml(m.path, m.phs);
+  const rows = (m.heard || m.copies || []).slice().sort((a, b) => a.t - b.t);
+  const heardHtml = rows.map(r => { const h = hopsOf(r.path, r.phs), last = h[h.length - 1];
+    return `<div class="heardrow"><div><b>${esc(last ? hopName(last) : "direct")}</b>${h.length ? `<small>${h.length} hop${h.length > 1 ? "s" : ""}: ${h.map(x => esc(hopName(x).split(" or ")[0])).join(" › ")}</small>` : ""}</div>
+      <div style="text-align:right">${r.snr != null ? "SNR " + r.snr : ""}${r.rssi != null ? " · " + r.rssi + " dBm" : ""}<small>${r.t && m.t ? "+" + Math.max(0, r.t - m.t).toFixed(0) + " s" : ""}</small></div></div>`; }).join("");
+  sheet(sheetHead(avatar(who, sender ? sender.type_id : 1, chan ? m.ch : null), out ? "Message sent" : "Message received", fmtTime(m.t)) + `
+    <div class="msgtext">${esc(m.text)}</div>
+    <div class="kv">${kv.map(([k, v]) => `<div><span>${k}</span><span>${esc(v)}</span></div>`).join("")}</div>
+    ${path ? `<h4>Path${out ? " used" : " it took"}</h4><div class="hops">${path} › <span class="hop">${out ? esc(convLabel("dm:" + (m.peer || "").slice(0, 12))) : "this radio"}</span></div>` : ""}
+    ${out && chan ? `<h4>Repeated by (${rows.length})</h4>${heardHtml || `<p class="count" style="margin:4px 16px">${m.heard ? "No repeater has been heard passing this on yet." : "Not tracked for this message (sent before this feature, or by the gateway)."}</p>`}` : ""}
+    ${!out && rows.length > 1 ? `<h4>Copies heard (${rows.length})</h4>${heardHtml}` : ""}
+    <div class="btns">${sender && sender.type_id !== 2 ? `<button class="btn pri" id="dMsg">Message ${esc(sender.name)}</button>` : ""}
+      ${sender ? `<button class="btn" id="dContact">Contact details</button>` : ""}
+      ${sender && sender.lat ? `<button class="btn" id="dMap">Show on map</button>` : ""}</div>`);
+  if ($("#dMsg")) $("#dMsg").onclick = () => { closeSheet(); openChat("dm:" + sender.key.slice(0, 12)); };
+  if ($("#dContact")) $("#dContact").onclick = () => contactSheet(sender.key);
+  if ($("#dMap")) $("#dMap").onclick = () => { closeSheet(); mapTo(sender); };
 }
 
 // ---------------- contacts
@@ -495,13 +598,14 @@ function renderContacts() {
     || `<div class="empty"><svg><use href="#i-person"/></svg><p>No contacts</p></div>`;
 }
 $("#cSearch").oninput = renderContacts; $("#cSort").onchange = renderContacts;
+$("#cMap").onclick = () => { setMapFilter(cFilter); showMap.fitted = false; go("map"); };
 $$("#cChips .chip[data-f]").forEach(b => b.onclick = () => { cFilter = b.dataset.f; $$("#cChips .chip[data-f]").forEach(x => x.classList.toggle("on", x === b)); renderContacts(); });
 $("#cList").onclick = e => { const b = e.target.closest("[data-ct]"); if (b) contactSheet(b.dataset.ct); };
 $("#cPending").onclick = e => { const k = e.target.dataset.addp; if (k) act(e.target, () => api("contact/add-pending", {key: k}), "Added").then(() => loadContacts()); };
 
 // ---------------- sheet
 function sheet(html) { $("#sheet").innerHTML = html; $("#scrim").classList.add("on"); }
-function closeSheet() { $("#scrim").classList.remove("on"); }
+function closeSheet() { $("#scrim").classList.remove("on"); openMsg = null; }
 $("#scrim").onclick = e => { if (e.target.id === "scrim" || e.target.closest("[data-close]")) closeSheet(); };
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
 const sheetHead = (av, name, sub) => `<div class="hd">${av}<div class="body"><b>${esc(name)}</b><div class="mono" style="color:var(--muted)">${esc(sub)}</div></div>
@@ -527,7 +631,7 @@ function contactSheet(key) {
       <div class="btns"><button class="btn pri" id="kRun">Run</button></div><pre class="out" id="kOut" hidden></pre>` : ""}`);
   const out = t => { const o = $("#kOut"); o.hidden = false; o.textContent = t; };
   if (chat) $("#kMsg").onclick = () => { closeSheet(); openChat("dm:" + c.key.slice(0, 12)); };
-  if ($("#kMap")) $("#kMap").onclick = () => { closeSheet(); go("map"); setTimeout(() => map && map.setView([c.lat, c.lon], 13), 60); };
+  if ($("#kMap")) $("#kMap").onclick = () => { closeSheet(); mapTo(c); };
   if ($("#kReset")) $("#kReset").onclick = e => act(e.target, () => api("contact/reset-path", {key}), "Route reset; the next message floods").then(() => loadContacts());
   $("#kRm").onclick = e => { if (confirm(`Remove ${c.name} from this radio's contacts?`))
     act(e.target, () => api("contact/remove", {key}), "Removed").then(r => { if (r) { closeSheet(); loadContacts(); } }); };
@@ -579,28 +683,75 @@ function channelSheet(idx, isNew) {
 }
 
 // ---------------- map
-let map, layer;
+let map, layer, markers = {}, mapFilter = "", picking = false;
+// City/state for a point (OpenStreetMap's Nominatim), asked only when a popup opens, and remembered.
+let geo = {}; try { geo = JSON.parse(localStorage.getItem("geo") || "{}"); } catch (e) {}
+async function placeOf(lat, lon) {
+  const k = lat.toFixed(2) + "," + lon.toFixed(2); if (geo[k]) return geo[k];
+  const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&lat=${lat}&lon=${lon}`);
+  if (!r.ok) throw new Error("place lookup " + r.status);
+  const a = (await r.json()).address || {};
+  const p = [a.city || a.town || a.village || a.hamlet || a.municipality || a.county, a.state || a.region,
+    a.country_code && a.country_code !== "us" ? a.country_code.toUpperCase() : ""].filter(Boolean).join(", ") || "open water / unknown";
+  geo[k] = p; try { localStorage.setItem("geo", JSON.stringify(geo)); } catch (e) {}
+  return p;
+}
+function setMapFilter(f) { mapFilter = f || ""; $$("#mapChips [data-mf]").forEach(x => x.classList.toggle("on", x.dataset.mf === mapFilter)); }
+$$("#mapChips [data-mf]").forEach(b => b.onclick = () => { setMapFilter(b.dataset.mf); showMap.fitted = false; showMap(); });
+function mapTo(c) { setMapFilter(""); go("map"); setTimeout(() => { if (!map) return; map.setView([c.lat, c.lon], 13); const mk = markers[c.key]; if (mk) mk.openPopup(); }, 80); }
+function popupHtml(c) {
+  const chat = c.type_id === 1 || c.type_id === 3;
+  return `<b>${esc(c.name)}</b><br>${esc(c.type)} · ${route(c.hops)}<br>Last advert ${ago(c.last_advert)}<br><span class="place">…</span>
+    <div class="pbtns">${chat ? `<button data-pmsg>Message</button>` : ""}<button data-pinfo>Details</button></div>`;
+}
+$("#mapSetMe").onclick = () => { picking = !picking; $("#mapSetMe").classList.toggle("on", picking); mapNote(); };
+function mapNote() {
+  const me = S.self || {}, n = $("#mapNote");
+  n.hidden = !(picking || !me.adv_lat);
+  n.textContent = picking ? "Click the map where this radio is." : "This radio has no position set, so it is not on the map. Use Set my position.";
+}
 function showMap() {
   if (!window.L) { $("#map").innerHTML = '<div class="empty">The map needs internet access to load.</div>'; return; }
   if (!map) {
     const dark = matchMedia("(prefers-color-scheme: dark)").matches;
     map = L.map("map").setView([26.4, -80.1], 9);
     L.tileLayer(`https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${dark ? "Dark" : "Light"}_Gray_Base/MapServer/tile/{z}/{y}/{x}`,
-      {maxZoom: 16, attribution: "Tiles © Esri"}).addTo(map);
+      {maxZoom: 16, attribution: "Tiles © Esri · places © OpenStreetMap"}).addTo(map);
+    // City, town and state names on top of the plain base map.
+    L.tileLayer(`https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${dark ? "Dark" : "Light"}_Gray_Reference/MapServer/tile/{z}/{y}/{x}`,
+      {maxZoom: 16}).addTo(map);
     layer = L.layerGroup().addTo(map);
+    map.on("click", e => { if (!picking) return;
+      const lat = +e.latlng.lat.toFixed(5), lon = +e.latlng.lng.toFixed(5);
+      if (!confirm(`Set this radio's position to ${lat}, ${lon}?` + ((S.self || {}).adv_loc_policy ? "\nPosition sharing is on: other radios will see it." : "\nPosition sharing is off: only this page shows it.")))
+        return;
+      picking = false; $("#mapSetMe").classList.remove("on");
+      act(null, () => api("settings", {lat, lon}), "Position saved").then(async () => { await loadState(); showMap(); }); });
+    map.on("popupopen", e => {
+      const el = e.popup.getElement(), c = e.popup._contact, ll = e.popup.getLatLng();
+      const pl = el.querySelector(".place");
+      if (pl) placeOf(ll.lat, ll.lng).then(p => pl.textContent = p).catch(err => { pl.textContent = "place unknown"; console.warn("place lookup failed", err); });
+      if (!c) return;
+      const b1 = el.querySelector("[data-pmsg]"), b2 = el.querySelector("[data-pinfo]");
+      if (b1) b1.onclick = () => { map.closePopup(); openChat("dm:" + c.key.slice(0, 12)); };
+      if (b2) b2.onclick = () => contactSheet(c.key);
+    });
   }
   setTimeout(() => map.invalidateSize(), 30);
-  layer.clearLayers();
+  layer.clearLayers(); markers = {};
   const pts = [];
   for (const c of contacts) {
-    if (!c.lat || !c.lon) continue;
-    L.circleMarker([c.lat, c.lon], {radius: 7, color: "#fff", weight: 1.5, fillColor: css((TYPES[c.type_id] || TYPES[1])[2]), fillOpacity: .95})
-      .bindPopup(`<b>${esc(c.name)}</b><br>${esc(c.type)} · ${route(c.hops)}<br>Last advert ${ago(c.last_advert)}`).addTo(layer);
+    if (!c.lat || !c.lon || (mapFilter && String(c.type_id) !== mapFilter)) continue;
+    const mk = L.circleMarker([c.lat, c.lon], {radius: 7, color: "#fff", weight: 1.5, fillColor: css((TYPES[c.type_id] || TYPES[1])[2]), fillOpacity: .95})
+      .bindPopup(popupHtml(c)).addTo(layer);
+    mk.getPopup()._contact = c; markers[c.key] = mk;
     pts.push([c.lat, c.lon]);
   }
   const me = S.self || {};
-  if (me.adv_lat) { L.circleMarker([me.adv_lat, me.adv_lon], {radius: 9, color: "#fff", weight: 2, fillColor: "#e5534b", fillOpacity: 1})
-    .bindPopup(`<b>${esc(me.name)}</b><br>This radio`).addTo(layer); pts.push([me.adv_lat, me.adv_lon]); }
+  if (me.adv_lat) { L.circleMarker([me.adv_lat, me.adv_lon], {radius: 10, color: "#fff", weight: 2.5, fillColor: "#e5534b", fillOpacity: 1})
+    .bindPopup(`<b>${esc(me.name)}</b><br>This radio · position ${me.adv_loc_policy ? "shared in adverts" : "private"}<br><span class="place">…</span>`).addTo(layer).bringToFront();
+    pts.push([me.adv_lat, me.adv_lon]); }
+  mapNote();
   if (pts.length && !showMap.fitted) {
     // First view: the local cluster around the median, not a stray far-away node.
     const med = i => pts.map(p => p[i]).sort((x, y) => x - y)[pts.length >> 1], c = [med(0), med(1)];
@@ -633,6 +784,7 @@ function fillSettings() {
   $("#sName").value = me.name; $("#sLat").value = me.adv_lat || 0; $("#sLon").value = me.adv_lon || 0;
   $("#sTx").value = me.tx_power; $("#sTx").max = me.max_tx_power; $("#sTxMax").textContent = `1 to ${me.max_tx_power} dBm`;
   $("#rFreq").value = me.radio_freq; $("#rBw").value = me.radio_bw; $("#rSf").value = me.radio_sf; $("#rCr").value = me.radio_cr;
+  $("#sShare").checked = me.adv_loc_policy === 1;
   $("#sAuto").checked = !me.manual_add_contacts; if (d.path_hash_mode != null) $("#sHash").value = d.path_hash_mode;
 }
 const saveSettings = (btn, body) => act(btn, () => api("settings", body), r => "Saved: " + r.changed.join(", "))
@@ -645,6 +797,7 @@ $("#sHere").onclick = () => navigator.geolocation ? navigator.geolocation.getCur
   p => { $("#sLat").value = p.coords.latitude.toFixed(5); $("#sLon").value = p.coords.longitude.toFixed(5); toast("Filled in. Press Save identity."); },
   () => toast("Location not available", true)) : toast("Location not available", true);
 $("#sSaveTx").onclick = e => +$("#sTx").value === (S.self || {}).tx_power ? toast("Nothing changed") : saveSettings(e.target, {tx_power: +$("#sTx").value});
+$("#sShare").onchange = e => saveSettings(null, {share_loc: e.target.checked});
 $("#sHash").onchange = e => saveSettings(null, {path_hash_mode: +e.target.value});
 $("#sAuto").onchange = e => saveSettings(null, {manual_add: !e.target.checked});
 $("#rSave").onclick = e => {

@@ -15,6 +15,7 @@ page you visit cannot drive the radio.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -33,6 +34,16 @@ PAGE = HERE / "radio_web.html"
 MSG_FILE = HERE / "logs" / "messages.jsonl"
 KEEP = 2000          # messages kept in memory and shown
 ADV_TYPES = {1: "Companion", 2: "Repeater", 3: "Room server", 4: "Sensor"}
+TALK_S = 30 * 60     # talk mode turns itself off after this long
+RX_MATCH_S = 15      # how far back a received DM is matched to its RF log entry
+
+
+def msg_hash(ts: int, text: str) -> int:
+    """The meshcore library's id for a channel message: its sender timestamp
+    plus the full 'name: text' body. Every copy of the same post (each repeat
+    we hear) has the same hash, so repeats can be counted."""
+    d = hashlib.sha256(int(ts).to_bytes(4, "little") + text.encode("utf-8")).digest()
+    return int.from_bytes(d[:4], "little")
 
 
 class ApiError(Exception):
@@ -65,10 +76,16 @@ class RadioWeb:
         self.port = port
         self.bridge = None                       # set by the bridge on each (re)connect
         self.msgs: deque = deque(maxlen=KEEP)
-        self.seq = 0
+        self.seq = 0                             # message ids
+        self.ver = 0                             # bumped on every new or changed message
+        self.by_hash: Dict[int, Dict] = {}       # channel msg_hash -> message
+        self.rxlog: deque = deque(maxlen=400)    # recent RF log entries (every packet heard)
         self.server: Optional[asyncio.base_events.Server] = None
         self.device: Dict = {}
         self.logins: Dict[str, float] = {}       # repeater key -> time logged in
+        # Talk mode: key prefix (12 hex) -> time.time() it ends. While on, DMs
+        # from that contact come to the page and the gateway ignores them.
+        self.talk: Dict[str, float] = {}
         self._load()
 
     # ------------------------------------------------------------ messages
@@ -80,13 +97,23 @@ class RadioWeb:
         except OSError:
             log.exception("web: could not read %s", MSG_FILE)
             return
+        by_t: Dict[float, Dict] = {}
         for line in lines:
             try:
                 m = json.loads(line)
             except ValueError:
                 continue
+            if "upd" in m:                       # later details for an earlier message
+                old = by_t.get(m.pop("upd"))
+                if old:
+                    old.update(m)
+                continue
             self.seq += 1
-            m["id"] = self.seq
+            self.ver += 1
+            m["id"], m["v"] = self.seq, self.ver
+            by_t[m["t"]] = m
+            if m.get("mh") is not None:
+                self.by_hash[m["mh"]] = m
             self.msgs.append(m)
         # keep the file from growing without end
         if len(lines) == KEEP:
@@ -96,7 +123,7 @@ class RadioWeb:
                 log.exception("web: could not trim %s", MSG_FILE)
 
     def record(self, direction: str, kind: str, text: str, peer: str = "",
-               name: str = "", channel: Optional[int] = None, **extra) -> None:
+               name: str = "", channel: Optional[int] = None, **extra) -> Dict:
         """Remember one mesh message (in or out) for the Messages tab."""
         self.seq += 1
         m = {"t": round(time.time(), 1), "dir": direction, "kind": kind,
@@ -108,8 +135,79 @@ class RadioWeb:
                 f.write(json.dumps(m) + "\n")
         except OSError:
             log.exception("web: could not append to %s", MSG_FILE)
-        m["id"] = self.seq
+        self.ver += 1
+        m["id"], m["v"] = self.seq, self.ver
         self.msgs.append(m)
+        if m.get("mh") is not None:
+            self.by_hash[m["mh"]] = m
+            while len(self.by_hash) > KEEP:
+                del self.by_hash[next(iter(self.by_hash))]
+            heard = [self._heard_row(e) for e in self.rxlog if e.get("mh") == m["mh"]]
+            if heard and direction == "out":
+                self.update(m, heard=heard)
+            elif heard:
+                self.update(m, copies=heard)
+        return m
+
+    def update(self, m: Dict, **fields) -> None:
+        """Add details to a message already recorded (saved as an update line)."""
+        m.update(fields)
+        self.ver += 1
+        m["v"] = self.ver
+        try:
+            with MSG_FILE.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"upd": m["t"], **fields}) + "\n")
+        except OSError:
+            log.exception("web: could not append to %s", MSG_FILE)
+
+    @staticmethod
+    def _heard_row(e: Dict) -> Dict:
+        return {k: e.get(k) for k in ("t", "snr", "rssi", "path", "phs", "route")}
+
+    def on_rx(self, p: Dict) -> None:
+        """One packet heard on the air (the radio's RF log)."""
+        e = {"t": p.get("recv_time") or time.time(), "snr": p.get("snr"), "rssi": p.get("rssi"),
+             "route": p.get("route_typename"), "ptype": p.get("payload_type"),
+             "path": p.get("path") or "", "phs": p.get("path_hash_size") or 1,
+             "hops": p.get("path_len")}
+        if p.get("msg_hash") is not None:
+            e["mh"] = p["msg_hash"]
+        pl = p.get("pkt_payload") or b""
+        if e["ptype"] == 2 and len(pl) >= 2:     # TXT_MSG (a DM): dest hash, src hash
+            e["dst"], e["src"] = pl[:1].hex(), pl[1:2].hex()
+        self.rxlog.append(e)
+        m = self.by_hash.get(e.get("mh"))
+        if m is None:
+            return
+        key = "heard" if m["dir"] == "out" else "copies"
+        rows = list(m.get(key) or [])
+        if any(r.get("path") == e["path"] for r in rows):
+            return                                 # same copy heard again
+        rows.append(self._heard_row(e))
+        self.update(m, **{key: rows})
+
+    def _rx_for_dm(self, prefix: str) -> Optional[Dict]:
+        """The RF log entry of a DM just received from `prefix`, if we can tell."""
+        me = ((self.bridge.mc.self_info or {}).get("public_key") or "")[:2]
+        src, now = (prefix or "")[:2].lower(), time.time()
+        for e in reversed(self.rxlog):
+            if now - e["t"] > RX_MATCH_S:
+                break
+            if e.get("src") == src and (not me or e.get("dst") == me):
+                return e
+        return None
+
+    def talking(self, prefix: str) -> bool:
+        """True while DMs from this key prefix are for the page, not the gateway."""
+        kp = (prefix or "").lower()[:12]
+        end = self.talk.get(kp)
+        if end is None:
+            return False
+        if end < time.time():
+            del self.talk[kp]
+            log.info("web: talk mode with %s ended (timed out)", kp)
+            return False
+        return True
 
     def contact_name(self, prefix: str) -> str:
         mc = self.bridge.mc if self.bridge else None
@@ -123,24 +221,53 @@ class RadioWeb:
         """Called once the bridge has connected to the radio."""
         self.bridge = bridge
         mc = bridge.mc
+        # Let the library decrypt channel packets in the RF log, so each post's
+        # path and every repeat of it can be matched. It needs the channel keys,
+        # which it learns from get_channel replies.
+        mc.set_decrypt_channel_logs(True)
+        asyncio.get_running_loop().create_task(self._learn_channels())
 
         async def on_dm(ev):
             p = ev.payload or {}
             kp = str(p.get("pubkey_prefix", ""))
+            rx = self._rx_for_dm(kp) or {}
             self.record("in", "dm", str(p.get("text", "")), peer=kp,
                         name=self.contact_name(kp), snr=p.get("SNR"),
-                        hops=p.get("path_len"))
+                        hops=p.get("path_len"), sent_ts=p.get("sender_timestamp"),
+                        rssi=rx.get("rssi"), path=rx.get("path"), phs=rx.get("phs"),
+                        route=rx.get("route"),
+                        talk=True if self.talking(kp) else None)
 
         async def on_chan(ev):
             p = ev.payload or {}
             name, sep, body = str(p.get("text", "")).partition(": ")
             if not sep:
                 name, body = "", str(p.get("text", ""))
+            ts = p.get("sender_timestamp")
             self.record("in", "chan", body, name=name, channel=p.get("channel_idx"),
-                        snr=p.get("SNR"), hops=p.get("path_len"))
+                        snr=p.get("SNR"), hops=p.get("path_len"), sent_ts=ts,
+                        rssi=p.get("RSSI"), path=p.get("path"),
+                        phs=(p.get("path_hash_mode") or 0) + 1,
+                        mh=msg_hash(ts, str(p.get("text", ""))) if ts else None)
+
+        async def on_rx(ev):
+            try:
+                self.on_rx(ev.payload or {})
+            except Exception:
+                log.exception("web: RF log entry not understood")
 
         mc.subscribe(EventType.CONTACT_MSG_RECV, on_dm)
         mc.subscribe(EventType.CHANNEL_MSG_RECV, on_chan)
+        mc.subscribe(EventType.RX_LOG_DATA, on_rx)
+
+    async def _learn_channels(self) -> None:
+        await asyncio.sleep(3)                  # let the bridge finish connecting
+        n = int(self.device.get("max_channels") or 8)
+        for i in range(n):
+            try:
+                await self._cmd(lambda mc, i=i: mc.commands.get_channel(i), 8)
+            except Exception as e:
+                log.warning("web: could not read channel %d for the RF log: %s", i, e)
 
     # ------------------------------------------------------------ server
     async def start(self) -> None:
@@ -244,6 +371,8 @@ class RadioWeb:
             out["sessions"] = self._sessions()
             out["members"] = b.members
             out["sysops"] = {n: u.get("pubkey", "")[:12] for n, u in b.cfg["users"].items()}
+        now = time.time()
+        out["talk"] = {k: int(e - now) for k, e in self.talk.items() if e > now}
         return out
 
     def _sessions(self):
@@ -257,8 +386,8 @@ class RadioWeb:
         return rows
 
     async def get_messages(self, q) -> Dict:
-        since = int(q.get("since") or 0)
-        return {"messages": [m for m in self.msgs if m["id"] > since]}
+        since = int(q.get("since") or 0)       # a version number, not an id
+        return {"messages": [m for m in self.msgs if m["v"] > since], "ver": self.ver}
 
     async def get_contacts(self, q) -> Dict:
         await self._cmd(lambda mc: mc.ensure_contacts(follow=True))
@@ -310,15 +439,39 @@ class RadioWeb:
             raise ApiError(400, "too long for one mesh message (140 bytes)")
         if a.get("to"):
             c = self._contact(a["to"])
+            kp = c["public_key"][:12].lower()
+            if kp not in self.talk:
+                log.info("web: talk mode with %s (%s) on", kp, c.get("adv_name", ""))
+            self.talk[kp] = time.time() + TALK_S   # before sending: replies can be quick
             r = await self._cmd(lambda mc: mc.commands.send_msg_with_retry(c, text), 90)
             acked = r is not None and r.type != EventType.ERROR
+            hops = c.get("out_path_len")
             self.record("out", "dm", text, peer=c["public_key"][:12],
-                        name=c.get("adv_name", ""), via="web", acked=acked)
+                        name=c.get("adv_name", ""), via="web", acked=acked,
+                        hops=hops, path=c.get("out_path") if hops and hops > 0 else None,
+                        phs=(c.get("out_path_hash_mode") or 0) + 1 if hops and hops > 0 else None,
+                        route="DIRECT" if hops is not None and hops >= 0 else "FLOOD")
             return {"acked": acked}
         ch = int(a.get("channel", 0))
-        _ok(await self._cmd(lambda mc: mc.commands.send_chan_msg(ch, text)))
-        self.record("out", "chan", text, channel=ch, name="(this radio)", via="web")
+        ts = int(time.time())     # ours, so we know the hash its repeats will carry
+        _ok(await self._cmd(lambda mc: mc.commands.send_chan_msg(ch, text, ts)))
+        me = (self._mc().self_info or {}).get("name", "")
+        self.record("out", "chan", text, channel=ch, name="(this radio)", via="web",
+                    sent_ts=ts, mh=msg_hash(ts, f"{me}: {text}"), heard=[])
         return {"sent": True}
+
+    async def post_talk(self, a) -> Dict:
+        """The page's switch: on holds replies for TALK_S (then it turns itself
+        off); off hands the contact back to the gateway now."""
+        kp = str(a.get("key") or "").lower()[:12]
+        if len(kp) != 12:
+            raise ApiError(400, "key must be at least 12 hex characters")
+        if a.get("on"):
+            self.talk[kp] = time.time() + TALK_S
+            log.info("web: talk mode with %s switched on", kp)
+        elif self.talk.pop(kp, None) is not None:
+            log.info("web: talk mode with %s off; the gateway answers again", kp)
+        return {"talk": kp in self.talk}
 
     async def post_advert(self, a) -> Dict:
         flood = bool(a.get("flood"))
@@ -340,6 +493,10 @@ class RadioWeb:
                 raise ApiError(400, "lat/lon out of range")
             _ok(await self._cmd(lambda mc: mc.commands.set_coords(lat, lon)))
             done.append("position")
+        if a.get("share_loc") is not None:
+            v = 1 if a["share_loc"] else 0
+            _ok(await self._cmd(lambda mc: mc.commands.set_advert_loc_policy(v)))
+            done.append("position " + ("shared" if v else "private"))
         if a.get("tx_power") is not None:
             p = int(a["tx_power"])
             mx = int((self._mc().self_info or {}).get("max_tx_power") or 30)
@@ -435,6 +592,7 @@ class RadioWeb:
             sb = old if old and any(old) else os.urandom(16)
         _ok(await self._cmd(lambda mc: mc.commands.set_channel(i, name, sb)))
         log.info("web: channel %d set to %r", i, name)
+        await self._cmd(lambda mc: mc.commands.get_channel(i), 8)   # RF log learns the key
         return {"done": True}
 
     async def post_repeater_login(self, a) -> Dict:
