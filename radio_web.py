@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from collections import deque
 from pathlib import Path
@@ -415,17 +416,23 @@ class RadioWeb:
         name = str(a.get("name") or "").strip()
         if i == self.bridge.chan and a.get("confirm") != "BRIDGE CHANNEL":
             raise ApiError(400, f"channel {i} is the bridge's private channel")
-        secret = a.get("secret")
-        sb = None
-        if secret:
+        secret = str(a.get("secret") or "").strip()
+        if a.get("clear") or not name:
+            name, sb = "", bytes(16)                 # empty slot
+        elif secret:
             try:
-                sb = bytes.fromhex(str(secret))
+                sb = bytes.fromhex(secret)
             except ValueError:
-                raise ApiError(400, "secret must be 32 hex characters")
+                sb = b""
             if len(sb) != 16:
                 raise ApiError(400, "secret must be 32 hex characters")
-        if not name:             # clear the slot
-            name, sb = "", bytes(16)
+        elif name.startswith("#"):
+            sb = None                                 # key derived from the name
+        else:
+            # Private channel, no key given: keep the slot's key, or make one.
+            cur = await self._cmd(lambda mc: mc.commands.get_channel(i), 8)
+            old = (cur.payload or {}).get("channel_secret") if cur and cur.type != EventType.ERROR else None
+            sb = old if old and any(old) else os.urandom(16)
         _ok(await self._cmd(lambda mc: mc.commands.set_channel(i, name, sb)))
         log.info("web: channel %d set to %r", i, name)
         return {"done": True}

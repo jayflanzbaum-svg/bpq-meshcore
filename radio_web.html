@@ -4,380 +4,540 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mesh Radio</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
 :root {
-  --bg: #f6f7f9; --panel: #fff; --text: #1b1f24; --muted: #667085; --line: #e3e6ea;
-  --accent: #2f6fde; --accent-text: #fff; --in: #eef3fc; --out: #e9f6ee; --warn: #b54708;
-  --bad: #c0362c; --good: #1f7a3f; --chip: #eef0f3;
+  --bg: #f4f6fa; --surface: #ffffff; --surface2: #eef1f6; --text: #1a1d23; --muted: #5f6877;
+  --line: #e2e6ec; --bar: #1e2733; --bar-text: #ffffff; --bar-muted: #b7c0cc;
+  --accent: #2563c9; --accent-soft: #dfe8f8; --on-accent: #ffffff;
+  --in: #ffffff; --out: #d9e6fb; --good: #1d7a43; --bad: #c0362c; --warn: #a35a00;
+  --t-companion: #2563c9; --t-repeater: #1d7a43; --t-room: #8a4bd1; --t-sensor: #a35a00;
+  --shadow: 0 1px 2px rgba(16,24,40,.08), 0 1px 3px rgba(16,24,40,.06);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #14171b; --panel: #1c2026; --text: #e6e8eb; --muted: #98a1ad; --line: #2c323a;
-    --accent: #5b8ff0; --accent-text: #0b0d10; --in: #1d2635; --out: #1c2b22; --warn: #f0a54a;
-    --bad: #f07167; --good: #5cc98a; --chip: #262b33;
+    --bg: #11151b; --surface: #1a2029; --surface2: #222a35; --text: #e7eaef; --muted: #9aa4b2;
+    --line: #2b3440; --bar: #0b0f14; --bar-text: #e7eaef; --bar-muted: #8d97a5;
+    --accent: #6b9cf2; --accent-soft: #23314a; --on-accent: #0b0f14;
+    --in: #222a35; --out: #263a5c; --good: #5cc98a; --bad: #f07167; --warn: #f0a54a;
+    --t-companion: #6b9cf2; --t-repeater: #5cc98a; --t-room: #b98cf0; --t-sensor: #f0a54a;
+    --shadow: none;
   }
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text);
-  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-  padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
-header h1 { font-size: 17px; margin: 0; }
-.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; }
-.meta { color: var(--muted); font-size: 13px; }
-nav { display: flex; gap: 2px; padding: 0 20px; background: var(--panel);
-  border-bottom: 1px solid var(--line); overflow-x: auto; }
-nav button { border: 0; background: none; color: var(--muted); padding: 10px 14px;
-  font: inherit; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
-nav button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
-main { padding: 16px 20px; max-width: 1200px; }
-section { display: none; } section.on { display: block; }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-  padding: 14px 16px; margin-bottom: 14px; }
-.card h2 { font-size: 14px; margin: 0 0 10px; }
-.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-input, select, textarea { font: inherit; color: var(--text); background: var(--bg);
-  border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
-button.b { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
-  border-radius: 6px; padding: 6px 12px; cursor: pointer; }
-button.b.pri { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-button.b.bad { color: var(--bad); }
-button.b:disabled { opacity: .5; cursor: default; }
-table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-th { color: var(--muted); font-weight: 600; font-size: 12px; }
-td.num { font-variant-numeric: tabular-nums; }
-.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
-.chip { background: var(--chip); border-radius: 10px; padding: 1px 8px; font-size: 12px; }
-#feed { height: 55vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px; }
-.msg { max-width: 80%; padding: 6px 10px; border-radius: 8px; background: var(--in); }
-.msg.out { align-self: flex-end; background: var(--out); }
-.msg .h { font-size: 12px; color: var(--muted); }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); display: flex; flex-direction: column;
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+button { font: inherit; color: inherit; }
+svg.i { width: 22px; height: 22px; fill: currentColor; flex: none; }
+
+.bar { background: var(--bar); color: var(--bar-text); display: flex; align-items: center; gap: 10px;
+  padding: 8px 8px 8px 16px; min-height: 56px; position: relative; }
+.bar .ttl { flex: 1; min-width: 0; }
+.bar .ttl b { display: block; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar .ttl small { color: var(--bar-muted); font-size: 12px; display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--bar-muted); flex: none; }
+.icon-btn { background: none; border: 0; padding: 8px; border-radius: 50%; cursor: pointer; display: grid; place-items: center; color: inherit; }
+.icon-btn:hover { background: rgba(127,127,127,.18); }
+#backBtn { display: none; margin-left: -8px; }
+.menu { position: absolute; right: 8px; top: 52px; background: var(--surface); color: var(--text);
+  border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.25); padding: 6px 0; min-width: 230px; z-index: 1000; display: none; }
+.menu.on { display: block; }
+.menu button { display: flex; align-items: center; gap: 14px; width: 100%; background: none; border: 0;
+  padding: 10px 16px; cursor: pointer; text-align: left; }
+.menu button:hover { background: var(--surface2); }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 6px 0; }
+
+#views { flex: 1; min-height: 0; position: relative; }
+.view { position: absolute; inset: 0; overflow-y: auto; display: none; }
+.view.on { display: block; }
+.wrap { max-width: 920px; margin: 0 auto; padding: 12px 12px 24px; }
+
+.nav { display: flex; background: var(--surface); border-top: 1px solid var(--line); }
+.nav button { flex: 1; background: none; border: 0; padding: 8px 4px 10px; cursor: pointer; color: var(--muted);
+  display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; position: relative; }
+.nav button .pill { padding: 3px 18px; border-radius: 14px; display: grid; place-items: center; }
+.nav button.on { color: var(--text); font-weight: 600; }
+.nav button.on .pill { background: var(--accent-soft); color: var(--accent); }
+.badge { position: absolute; top: 3px; left: calc(50% + 8px); background: var(--bad); color: #fff;
+  font-size: 11px; line-height: 16px; min-width: 16px; padding: 0 4px; border-radius: 8px; font-weight: 600; }
+
+.list { background: var(--surface); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden; }
+.item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 0; border-bottom: 1px solid var(--line);
+  cursor: pointer; background: none; width: 100%; text-align: left; }
+.item:last-child { border-bottom: 0; }
+.item:hover, .item.sel { background: var(--surface2); }
+.item .body { flex: 1; min-width: 0; }
+.item .l1 { display: flex; gap: 8px; align-items: baseline; }
+.item .l1 b { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.item .l1 span { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.item .l2 { color: var(--muted); font-size: 13px; white-space: nowrap; display: flex; gap: 8px; align-items: center; }
+.item .l2 .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.item .unread { background: var(--accent); color: var(--on-accent); font-size: 11px; font-weight: 700;
+  border-radius: 10px; padding: 0 7px; line-height: 18px; }
+.avatar { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  color: #fff; font-weight: 700; font-size: 15px; }
+.avatar svg { width: 22px; height: 22px; fill: #fff; }
+.empty { text-align: center; color: var(--muted); padding: 60px 20px; }
+.empty svg { width: 48px; height: 48px; fill: var(--muted); opacity: .6; }
+
+.tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.search { flex: 1; min-width: 180px; display: flex; align-items: center; gap: 8px; background: var(--surface);
+  border-radius: 24px; padding: 6px 14px; box-shadow: var(--shadow); border: 1px solid var(--line); color: var(--muted); }
+.search input { border: 0; background: none; outline: none; flex: 1; font: inherit; color: var(--text); padding: 2px 0; }
+.chip { border: 1px solid var(--line); background: var(--surface); border-radius: 16px; padding: 4px 12px;
+  cursor: pointer; font-size: 13px; color: var(--muted); font-family: inherit; }
+.chip.on { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: 600; }
+.count { color: var(--muted); font-size: 12px; margin: 0 2px 8px; }
+.toggle { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; margin: 0 4px 10px; cursor: pointer; }
+
+#chat { display: none; flex-direction: column; min-height: 0; }
+#feed { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 4px; }
+.day { align-self: center; font-size: 12px; color: var(--muted); background: var(--surface2); border-radius: 10px; padding: 2px 10px; margin: 8px 0; }
+.msg { max-width: min(78%, 560px); padding: 7px 11px 5px; border-radius: 14px; background: var(--in);
+  box-shadow: var(--shadow); align-self: flex-start; border-bottom-left-radius: 4px; }
+.msg.out { align-self: flex-end; background: var(--out); border-bottom-left-radius: 14px; border-bottom-right-radius: 4px; }
+.msg .who { font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 1px; }
 .msg .t { white-space: pre-wrap; word-break: break-word; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px 18px; }
-.kv { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px dashed var(--line); padding: 3px 0; }
+.msg .m { font-size: 11px; color: var(--muted); text-align: right; margin-top: 2px; }
+.msg.gw { opacity: .8; }
+.composer { display: flex; gap: 8px; padding: 8px 10px; background: var(--surface); border-top: 1px solid var(--line); align-items: center; }
+.composer input { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 22px;
+  padding: 10px 16px; font: inherit; outline: none; }
+.composer .len { font-size: 11px; color: var(--muted); }
+.send { background: var(--accent); border: 0; width: 42px; height: 42px; border-radius: 50%; cursor: pointer; display: grid; place-items: center; flex: none; }
+.send svg { fill: var(--on-accent); }
+.send:disabled { opacity: .5; }
+#chatHead { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: var(--surface); border-bottom: 1px solid var(--line); }
+#chatHead .body { flex: 1; min-width: 0; }
+#chatHead b { display: block; }
+#chatHead small { color: var(--muted); }
+#chatNone { flex: 1; display: grid; place-items: center; color: var(--muted); }
+
+@media (min-width: 900px) {
+  #v-chats.on { display: grid; grid-template-columns: 340px 1fr; overflow: hidden; }
+  #v-chats .side { overflow-y: auto; border-right: 1px solid var(--line); }
+  #v-chats .side .wrap { padding: 10px 0 0; }
+  #v-chats .side .search, #v-chats .side .toggle { margin-left: 10px; margin-right: 10px; }
+  #v-chats .side .list { border-radius: 0; box-shadow: none; }
+  #chat { display: flex; height: 100%; }
+}
+@media (max-width: 899px) {
+  #v-chats.chatting.on { overflow: hidden; }
+  #v-chats.chatting .side { display: none; }
+  #v-chats.chatting #chat { display: flex; height: 100%; }
+  #chatHead { display: none; }
+}
+
+.card { background: var(--surface); border-radius: 10px; box-shadow: var(--shadow); padding: 4px 0; margin-bottom: 14px; }
+.card h3 { font-size: 13px; color: var(--accent); margin: 10px 16px 4px; font-weight: 600; letter-spacing: .02em;
+  display: flex; justify-content: space-between; align-items: center; }
+.row { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.row:last-child { border-bottom: 0; }
+.row .lbl { flex: 1; min-width: 180px; }
+.row .lbl small { display: block; color: var(--muted); font-size: 12px; }
+input, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+.kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0 18px; padding: 6px 16px 10px; }
+.kv div { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
 .kv span:first-child { color: var(--muted); }
-label.f { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
-#toast { position: fixed; bottom: 16px; right: 16px; background: var(--text); color: var(--bg);
-  padding: 8px 14px; border-radius: 6px; opacity: 0; transition: opacity .2s; max-width: 420px; }
-#toast.on { opacity: 1; }
-.warn { color: var(--warn); } .good { color: var(--good); } .bad { color: var(--bad); }
-pre.out { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px;
-  white-space: pre-wrap; max-height: 300px; overflow: auto; margin: 8px 0 0; }
-@media (max-width: 640px) { main, header, nav { padding-left: 12px; padding-right: 12px; } .msg { max-width: 95%; } }
+.kv span:last-child { text-align: right; overflow-wrap: anywhere; }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 18px; padding: 7px 16px; cursor: pointer; }
+.btn.pri { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.btn.bad { color: var(--bad); }
+.btn:disabled { opacity: .5; cursor: default; }
+.btns { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 16px; }
+.switch { position: relative; width: 40px; height: 22px; flex: none; display: inline-block; }
+.switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+.switch span { position: absolute; inset: 0; background: var(--line); border-radius: 11px; cursor: pointer; transition: .15s; }
+.switch span::before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .15s; }
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::before { transform: translateX(18px); }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+.good { color: var(--good); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { color: var(--muted); font-size: 12px; font-weight: 600; }
+
+.scrim { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; z-index: 2000; align-items: flex-end; justify-content: center; }
+.scrim.on { display: flex; }
+@media (min-width: 700px) { .scrim { align-items: center; } }
+.sheet { background: var(--surface); width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto;
+  border-radius: 16px 16px 0 0; padding: 6px 0 12px; }
+@media (min-width: 700px) { .sheet { border-radius: 14px; } }
+.sheet .hd { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+.sheet .hd b { font-size: 17px; }
+.sheet .hd .body { flex: 1; min-width: 0; }
+.sheet h4 { font-size: 13px; color: var(--accent); margin: 12px 16px 4px; }
+.field { display: flex; flex-direction: column; gap: 4px; padding: 6px 16px; }
+.field label { font-size: 12px; color: var(--muted); }
+pre.out { margin: 8px 16px 0; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px;
+  white-space: pre-wrap; max-height: 260px; overflow: auto; font-size: 12.5px; }
+
+#map { position: absolute; inset: 0; }
+.legend { position: absolute; z-index: 500; left: 10px; bottom: 10px; background: var(--surface); border-radius: 8px;
+  padding: 6px 10px; box-shadow: var(--shadow); font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
+.fab { position: absolute; right: 18px; bottom: 18px; width: 54px; height: 54px; border-radius: 16px; border: 0;
+  background: var(--accent); cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,.25); display: grid; place-items: center; }
+.fab svg { fill: var(--on-accent); }
+#toast { position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); background: #2b3440; color: #fff;
+  padding: 10px 16px; border-radius: 8px; opacity: 0; transition: opacity .2s; max-width: 90vw; z-index: 3000; pointer-events: none; }
+#toast.on { opacity: 1; } #toast.bad { background: var(--bad); }
 </style>
 </head>
 <body>
-<header>
-  <h1 id="title">Mesh Radio</h1>
-  <span id="conn" class="meta"><span class="dot" style="background:var(--muted)"></span>connecting…</span>
-  <span id="hdr" class="meta"></span>
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 3h16a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 1-2zm2 5v2h12V8H6zm0 4v2h8v-2H6z"/></symbol>
+  <symbol id="i-person" viewBox="0 0 24 24"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm0 2c-4.4 0-8 2.2-8 5v2h16v-2c0-2.8-3.6-5-8-5z"/></symbol>
+  <symbol id="i-hash" viewBox="0 0 24 24"><path d="M9.5 3 8.8 8H5v2h3.5l-.6 4H4v2h3.6L7 21h2l.7-5h4L13 21h2l.7-5H20v-2h-4l.6-4H20V8h-3.1l.6-5h-2l-.7 5h-4l.7-5h-2zm.7 7h4l-.6 4h-4l.6-4z"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M15 5.1 9 3 3 5v16l6-2.1 6 2.1 6-2V3l-6 2.1zM15 19l-6-2.1V5l6 2.1V19z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M3 20.5 21 12 3 3.5V10l12 2-12 2z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><path d="M10 3a7 7 0 0 1 5.6 11.2l5.1 5.1-1.4 1.4-5.1-5.1A7 7 0 1 1 10 3zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10z"/></symbol>
+  <symbol id="i-tower" viewBox="0 0 24 24"><path d="M12 9a2 2 0 0 1 1 3.7L16 22h-2l-.7-2h-2.6l-.7 2H8l3-9.3A2 2 0 0 1 12 9zm-.6 9h1.2L12 16zM6.3 4.3l1.4 1.4a6 6 0 0 0 0 8.6l-1.4 1.4a8 8 0 0 1 0-11.4zm11.4 0a8 8 0 0 1 0 11.4l-1.4-1.4a6 6 0 0 0 0-8.6z"/></symbol>
+  <symbol id="i-room" viewBox="0 0 24 24"><path d="M3 4h12a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H7l-4 3V6a2 2 0 0 1 0-2zm18 4a1 1 0 0 1 1 1v12l-4-3h-8a2 2 0 0 1-2-2v-1h9a2 2 0 0 0 2-2V8h2z"/></symbol>
+  <symbol id="i-sensor" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 1 3 3v8.3a5 5 0 1 1-6 0V5a3 3 0 0 1 3-3zm0 2a1 1 0 0 0-1 1v9.4l-.5.3a3 3 0 1 0 3 0l-.5-.3V5a1 1 0 0 0-1-1z"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="m19.4 13 .1-1-.1-1 2.1-1.6-2-3.5-2.5 1a7 7 0 0 0-1.7-1L15 3h-4l-.4 2.9a7 7 0 0 0-1.7 1l-2.5-1-2 3.5L6.5 11l-.1 1 .1 1-2.1 1.6 2 3.5 2.5-1c.5.4 1.1.7 1.7 1L11 21h4l.4-2.9c.6-.3 1.2-.6 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></symbol>
+  <symbol id="i-gate" viewBox="0 0 24 24"><path d="M4 4h16v4H4zm0 6h7v10H4zm9 0h7v4h-7zm0 6h7v4h-7z"/></symbol>
+  <symbol id="i-advert" viewBox="0 0 24 24"><path d="M12 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4zM7.8 7.8l1.4 1.4a4 4 0 0 0 0 5.6l-1.4 1.4a6 6 0 0 1 0-8.4zm8.4 0a6 6 0 0 1 0 8.4l-1.4-1.4a4 4 0 0 0 0-5.6zM5 5l1.4 1.4a8 8 0 0 0 0 11.2L5 19A10 10 0 0 1 5 5zm14 0a10 10 0 0 1 0 14l-1.4-1.4a8 8 0 0 0 0-11.2z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6.4 5 12 10.6 17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M17.7 6.3A8 8 0 1 0 20 12h-2a6 6 0 1 1-1.8-4.2L13 11h7V4z"/></symbol>
+</svg>
+
+<header class="bar">
+  <button class="icon-btn" id="backBtn" title="Back"><svg class="i"><use href="#i-back"/></svg></button>
+  <div class="ttl"><b id="title">Mesh Radio</b><small id="status"><span class="dot"></span>connecting…</small></div>
+  <button class="icon-btn" id="advBtn" title="Send zero-hop advert"><svg class="i"><use href="#i-advert"/></svg></button>
+  <button class="icon-btn" id="menuBtn" title="More"><svg class="i"><use href="#i-more"/></svg></button>
+  <div class="menu" id="menu">
+    <button data-go="settings"><svg class="i"><use href="#i-settings"/></svg>Settings</button>
+    <button data-go="gateway"><svg class="i"><use href="#i-gate"/></svg>Gateway</button>
+    <hr>
+    <button data-adv="0"><svg class="i"><use href="#i-advert"/></svg>Send zero-hop advert</button>
+    <button data-adv="1"><svg class="i"><use href="#i-advert"/></svg>Send flood advert</button>
+    <hr>
+    <button id="mRefresh"><svg class="i"><use href="#i-refresh"/></svg>Refresh contacts</button>
+  </div>
 </header>
-<nav id="tabs">
-  <button data-t="messages" class="on">Messages</button>
-  <button data-t="contacts">Contacts</button>
-  <button data-t="channels">Channels</button>
-  <button data-t="radio">Radio</button>
-  <button data-t="gateway">Gateway</button>
-</nav>
-<main>
 
-<section id="messages" class="on">
-  <div class="card">
-    <div class="row" style="margin-bottom:8px">
-      <label class="f">Show
-        <select id="filter"><option value="">Everything</option></select></label>
-      <label class="f" style="flex-direction:row;align-items:center;gap:6px;margin-top:14px">
-        <input type="checkbox" id="hideBridge"> Hide gateway traffic</label>
-    </div>
-    <div id="feed"></div>
-  </div>
-  <div class="card">
-    <h2>Send</h2>
-    <div class="row">
-      <select id="sendTo"></select>
-      <input id="sendText" maxlength="140" placeholder="Message (140 max)" style="flex:1;min-width:200px">
-      <span id="sendLen" class="meta">0/140</span>
-      <button class="b pri" id="sendBtn">Send</button>
-    </div>
-  </div>
-</section>
-
-<section id="contacts">
-  <div class="card">
-    <div class="row" style="justify-content:space-between;margin-bottom:8px">
-      <h2 style="margin:0">Contacts <span id="ccount" class="meta"></span></h2>
-      <div class="row">
-        <input id="csearch" placeholder="Filter by name or key">
-        <button class="b" id="crefresh">Refresh</button>
+<div id="views">
+  <section class="view" id="v-chats">
+    <div class="side"><div class="wrap">
+      <div class="search" style="margin-bottom:10px"><svg class="i"><use href="#i-search"/></svg><input id="chatSearch" placeholder="Search chats"></div>
+      <label class="toggle"><span class="switch"><input type="checkbox" id="hideGw"><span></span></span>Hide gateway sessions</label>
+      <div class="list" id="convList"></div>
+    </div></div>
+    <div id="chat">
+      <div id="chatHead" hidden><div id="chatAv"></div><div class="body"><b id="chatName"></b><small id="chatSub" class="mono"></small></div></div>
+      <div id="chatNone">Pick a chat</div>
+      <div id="feed" hidden></div>
+      <div class="composer" id="composer" hidden>
+        <input id="msgText" maxlength="140" placeholder="Message" autocomplete="off">
+        <span class="len" id="msgLen">0/140</span>
+        <button class="send" id="sendBtn" title="Send"><svg class="i"><use href="#i-send"/></svg></button>
       </div>
     </div>
-    <div style="overflow-x:auto"><table id="ctable"><thead><tr>
-      <th>Name</th><th>Type</th><th>Key</th><th>Last advert</th><th>Route</th><th></th>
-    </tr></thead><tbody></tbody></table></div>
-    <div id="pending" class="meta" style="margin-top:8px"></div>
-  </div>
-  <div class="card" id="admin" hidden>
-    <h2>Admin: <span id="aname"></span> <span id="akey" class="mono meta"></span></h2>
-    <div class="row">
-      <input id="apwd" type="password" placeholder="Admin or guest password" autocomplete="off">
-      <button class="b" id="alogin">Log in</button>
-      <button class="b" id="astatus">Status</button>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <input id="acmd" placeholder="CLI command, e.g. get name, ver, neighbors, clock" style="flex:1;min-width:220px">
-      <button class="b pri" id="acmdBtn">Run</button>
-    </div>
-    <pre class="out" id="aout" hidden></pre>
-  </div>
-</section>
+  </section>
 
-<section id="channels">
-  <div class="card">
-    <h2>Channels</h2>
-    <table id="chtable"><thead><tr><th>#</th><th>Name</th><th>Hash</th><th></th></tr></thead><tbody></tbody></table>
-  </div>
-  <div class="card">
-    <h2>Add or change a channel</h2>
-    <div class="row">
-      <label class="f">Slot <input id="chIdx" type="number" min="0" max="39" style="width:70px"></label>
-      <label class="f">Name <input id="chName" placeholder="#public-hashtag or Private name"></label>
-      <label class="f">Secret (32 hex; blank for a #hashtag channel)
-        <input id="chSecret" class="mono" style="width:300px" autocomplete="off"></label>
-      <button class="b pri" id="chSave" style="margin-top:14px">Save</button>
+  <section class="view" id="v-contacts"><div class="wrap">
+    <div class="tools"><div class="search"><svg class="i"><use href="#i-search"/></svg><input id="cSearch" placeholder="Search contacts"></div></div>
+    <div class="tools" id="cChips">
+      <button class="chip on" data-f="">All</button><button class="chip" data-f="1">Companions</button>
+      <button class="chip" data-f="2">Repeaters</button><button class="chip" data-f="3">Rooms</button><button class="chip" data-f="4">Sensors</button>
+      <select id="cSort" class="chip" style="margin-left:auto"><option value="heard">Last heard</option><option value="name">Name</option></select>
     </div>
-    <p class="meta">A name starting with # makes a public hashtag channel whose key comes from the name. Saving an empty name clears the slot.</p>
-  </div>
-</section>
+    <div class="count" id="cCount"></div>
+    <div class="list" id="cList"></div>
+    <div id="cPending" style="margin-top:14px"></div>
+  </div></section>
 
-<section id="radio">
-  <div class="card">
-    <div class="row" style="justify-content:space-between"><h2 style="margin:0">This radio</h2>
-      <button class="b" id="statsBtn">Refresh stats</button></div>
-    <div class="grid" id="info" style="margin-top:10px"></div>
+  <section class="view" id="v-channels"><div class="wrap">
+    <div class="list" id="chList"></div>
+    <p class="count" style="margin-top:10px">Tap a channel to open its chat. Edit renames it or changes its key.</p>
   </div>
-  <div class="card">
-    <h2>Identity and position</h2>
-    <div class="row">
-      <label class="f">Name <input id="sName" style="width:220px"></label>
-      <label class="f">Latitude <input id="sLat" style="width:120px"></label>
-      <label class="f">Longitude <input id="sLon" style="width:120px"></label>
-      <label class="f">TX power (dBm) <input id="sTx" type="number" style="width:90px"></label>
-      <button class="b pri" id="sSave" style="margin-top:14px">Save</button>
-    </div>
-    <div class="row" style="margin-top:10px">
-      <label class="f" style="flex-direction:row;align-items:center;gap:6px">
-        <input type="checkbox" id="sAuto"> Auto-add contacts from adverts (the gateway's guest tier needs this on)</label>
-    </div>
-    <div class="row" style="margin-top:10px">
-      <label class="f">Path hash size
-        <select id="sHash"><option value="0">1 byte</option><option value="1">2 bytes</option><option value="2">3 bytes</option></select></label>
-      <span class="meta" style="margin-top:14px">Bytes per hop in routes. Older repeaters (before about v1.14) only handle 1 byte.</span>
-    </div>
-  </div>
-  <div class="card">
-    <h2>Adverts and clock</h2>
-    <div class="row">
-      <button class="b" id="advZero">Send zero-hop advert</button>
-      <button class="b" id="advFlood">Send flood advert</button>
-      <button class="b" id="syncTime">Set radio clock from this PC</button>
-    </div>
-  </div>
-  <div class="card">
-    <h2>LoRa settings <span class="warn" style="font-weight:400">changing these takes the radio off the local mesh unless everyone else matches</span></h2>
-    <div class="row">
-      <label class="f">Frequency (MHz) <input id="rFreq" style="width:110px"></label>
-      <label class="f">Bandwidth (kHz) <input id="rBw" style="width:90px"></label>
-      <label class="f">SF <input id="rSf" type="number" style="width:70px"></label>
-      <label class="f">CR <input id="rCr" type="number" style="width:70px"></label>
-      <button class="b bad" id="rSave" style="margin-top:14px">Apply…</button>
-    </div>
-  </div>
-  <div class="card">
-    <h2>Reboot</h2>
-    <p class="meta">Mesh users are cut off for about 40 seconds while the radio restarts and the bridge reconnects.</p>
-    <button class="b bad" id="reboot">Reboot radio…</button>
-  </div>
-</section>
+  <button class="fab" id="chAdd" title="Add channel"><svg class="i"><use href="#i-plus"/></svg></button>
+  </section>
 
-<section id="gateway">
-  <div class="card">
-    <h2>Sessions</h2>
-    <table id="stable"><thead><tr><th>User</th><th>Reply via</th><th>Node session</th><th>Idle</th><th>Pages waiting</th></tr></thead><tbody></tbody></table>
-  </div>
-  <div class="card">
-    <h2>Signups</h2>
-    <table id="mtable"><thead><tr><th>Callsign</th><th>Name</th><th>Class</th><th>Radio</th><th>Requested</th><th>Status</th><th></th></tr></thead><tbody></tbody></table>
-  </div>
-  <div class="card">
-    <h2>Sysop radios</h2>
-    <div id="sysops" class="meta"></div>
-  </div>
-</section>
-</main>
+  <section class="view" id="v-map"><div id="map"></div>
+    <div class="legend"><span><i style="background:var(--t-companion)"></i>Companion</span><span><i style="background:var(--t-repeater)"></i>Repeater</span>
+      <span><i style="background:var(--t-room)"></i>Room</span><span><i style="background:var(--t-sensor)"></i>Sensor</span><span><i style="background:#e5534b"></i>This radio</span></div>
+  </section>
+
+  <section class="view" id="v-settings"><div class="wrap">
+    <div class="card"><h3>Identity</h3>
+      <div class="row"><div class="lbl">Name</div><input id="sName" style="width:220px"></div>
+      <div class="row"><div class="lbl">Position<small>Shared in adverts. 0, 0 keeps the radio off maps.</small></div>
+        <input id="sLat" placeholder="Lat" style="width:110px"><input id="sLon" placeholder="Lon" style="width:110px"></div>
+      <div class="btns"><button class="btn pri" id="sSaveId">Save identity</button><button class="btn" id="sHere">Use this PC's location</button></div>
+    </div>
+    <div class="card"><h3>Radio</h3>
+      <div class="row"><div class="lbl">TX power<small id="sTxMax"></small></div><input id="sTx" type="number" style="width:90px"> dBm</div>
+      <div class="row"><div class="lbl">Frequency</div><input id="rFreq" style="width:110px"> MHz</div>
+      <div class="row"><div class="lbl">Bandwidth</div><input id="rBw" style="width:90px"> kHz</div>
+      <div class="row"><div class="lbl">Spreading factor / coding rate</div><input id="rSf" type="number" style="width:70px"><input id="rCr" type="number" style="width:70px"></div>
+      <div class="row"><div class="lbl warn">Changing frequency, bandwidth, SF or CR takes the radio off the local mesh unless every other node matches.</div></div>
+      <div class="btns"><button class="btn pri" id="sSaveTx">Save TX power</button><button class="btn bad" id="rSave">Apply LoRa settings…</button></div>
+    </div>
+    <div class="card"><h3>Routing and contacts</h3>
+      <div class="row"><div class="lbl">Path hash size<small>Bytes per hop in routes. Repeaters older than about v1.14 handle 1 byte only.</small></div>
+        <select id="sHash"><option value="0">1 byte</option><option value="1">2 bytes</option><option value="2">3 bytes</option></select></div>
+      <div class="row"><div class="lbl">Auto-add contacts<small>Store every radio heard in an advert. The gateway's guest tier needs this on.</small></div>
+        <label class="switch"><input type="checkbox" id="sAuto"><span></span></label></div>
+    </div>
+    <div class="card"><h3>Adverts and clock</h3>
+      <div class="btns"><button class="btn" data-adv="0">Send zero-hop advert</button><button class="btn" data-adv="1">Send flood advert</button>
+        <button class="btn" id="syncTime">Set radio clock from this PC</button></div>
+    </div>
+    <div class="card"><h3>Device <button class="btn" id="statsBtn" style="font-size:12px;padding:3px 12px">Refresh</button></h3>
+      <div class="kv" id="info"></div>
+      <div class="btns"><button class="btn bad" id="reboot">Reboot radio…</button></div>
+    </div>
+  </div></section>
+
+  <section class="view" id="v-gateway"><div class="wrap">
+    <div class="card"><h3>Sessions</h3><div style="overflow-x:auto"><table id="sTable"><thead><tr><th>User</th><th>Via</th><th>Node session</th><th>Idle</th><th>Pages waiting</th></tr></thead><tbody></tbody></table></div></div>
+    <div class="card"><h3>Signups</h3><div style="overflow-x:auto"><table id="mTable"><thead><tr><th>Callsign</th><th>Name</th><th>Class</th><th>Radio</th><th>Requested</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div></div>
+    <div class="card"><h3>Sysop radios</h3><div class="kv" id="sysops"></div></div>
+  </div></section>
+</div>
+
+<nav class="nav" id="nav">
+  <button data-v="chats" class="on"><span class="pill"><svg class="i"><use href="#i-chat"/></svg></span>Chats<span class="badge" id="unreadBadge" hidden></span></button>
+  <button data-v="contacts"><span class="pill"><svg class="i"><use href="#i-person"/></svg></span>Contacts</button>
+  <button data-v="channels"><span class="pill"><svg class="i"><use href="#i-hash"/></svg></span>Channels</button>
+  <button data-v="map"><span class="pill"><svg class="i"><use href="#i-map"/></svg></span>Map</button>
+</nav>
+
+<div class="scrim" id="scrim"><div class="sheet" id="sheet"></div></div>
 <div id="toast"></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-const $ = s => document.querySelector(s);
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-let S = {}, contacts = [], channels = [], lastId = 0, msgs = [], adminKey = null;
+const TYPES = {1: ["Companion", "i-person", "--t-companion"], 2: ["Repeater", "i-tower", "--t-repeater"],
+               3: ["Room server", "i-room", "--t-room"], 4: ["Sensor", "i-sensor", "--t-sensor"]};
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const wide = () => innerWidth >= 900;
+let S = {}, contacts = [], channels = [], msgs = [], lastId = 0, stats = {}, conv = null, view = "chats", cFilter = "";
+let seen = {}; try { seen = JSON.parse(localStorage.getItem("seen") || "{}"); } catch (e) {}
+const saveSeen = () => { try { localStorage.setItem("seen", JSON.stringify(seen)); } catch (e) {} };
 
-function toast(t, bad) {
-  const el = $("#toast"); el.textContent = t; el.style.background = bad ? "var(--bad)" : "";
-  el.classList.add("on"); clearTimeout(toast.h); toast.h = setTimeout(() => el.classList.remove("on"), 4000);
-}
+function toast(t, bad) { const el = $("#toast"); el.textContent = t; el.className = bad ? "on bad" : "on";
+  clearTimeout(toast.h); toast.h = setTimeout(() => el.className = "", 3500); }
 async function api(path, body) {
-  const opt = body === undefined ? {} :
-    {method: "POST", headers: {"Content-Type": "application/json", "X-Radio": "1"}, body: JSON.stringify(body)};
+  const opt = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json", "X-Radio": "1"}, body: JSON.stringify(body)};
   const r = await fetch("/api/" + path, opt);
   const j = await r.json().catch(() => ({error: "bad reply (" + r.status + ")"}));
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
 }
-async function act(btn, fn, okMsg) {
+async function act(btn, fn, ok) {
   if (btn) btn.disabled = true;
-  try { const r = await fn(); if (okMsg) toast(typeof okMsg === "function" ? okMsg(r) : okMsg); return r; }
-  catch (e) { toast(e.message, true); }
-  finally { if (btn) btn.disabled = false; }
+  try { const r = await fn(); const t = typeof ok === "function" ? ok(r) : ok; if (t) toast(t); return r; }
+  catch (e) { toast(e.message, true); } finally { if (btn) btn.disabled = false; }
 }
-const ago = t => { if (!t) return "never"; const s = Date.now()/1000 - t;
-  if (s < -120) return "their clock is fast"; if (s < 90) return "just now"; 
-  if (s < 5400) return Math.round(s/60) + "m ago"; if (s < 172800) return Math.round(s/3600) + "h ago";
-  return Math.round(s/86400) + "d ago"; };
-const hhmm = t => new Date(t*1000).toLocaleString([], {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit"});
-const route = h => h == null || h < 0 ? "flood" : h == 0 ? "direct" : h + " hop" + (h > 1 ? "s" : "");
-const nameOf = k => (contacts.find(c => c.key.startsWith(k)) || {}).name || "";
+const ago = t => { if (!t || t < 1e9) return "never"; const s = Date.now()/1000 - t;
+  if (s < -120) return "clock fast"; if (s < 90) return "now"; if (s < 5400) return Math.round(s/60) + "m";
+  if (s < 129600) return Math.round(s/3600) + "h"; return Math.round(s/86400) + "d"; };
+const clock = t => new Date(t*1000).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
+const dayOf = t => new Date(t*1000).toLocaleDateString([], {weekday: "short", month: "short", day: "numeric"});
+const route = h => h == null || h < 0 ? "Flood" : h === 0 ? "Direct" : h + " hop" + (h > 1 ? "s" : "");
+const contactBy = k => k ? contacts.find(c => c.key.startsWith(k)) : null;
+const nameOf = k => (contactBy(k) || {}).name || "";
+const initials = n => (n || "?").replace(/[^\p{L}\p{N} ]/gu, "").trim().split(/\s+/).slice(0, 2).map(w => w[0]).join("").toUpperCase() || "?";
+function avatar(name, type, ch) {
+  if (ch != null) return `<div class="avatar" style="background:${css("--accent")}"><svg><use href="#i-hash"/></svg></div>`;
+  const t = TYPES[type], col = t ? css(t[2]) : css("--muted");
+  return type && type !== 1 ? `<div class="avatar" style="background:${col}"><svg><use href="#${t[1]}"/></svg></div>`
+    : `<div class="avatar" style="background:${col}">${esc(initials(name))}</div>`;
+}
 
-// ---- tabs
-document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
-  document.querySelectorAll("#tabs button, main section").forEach(x => x.classList.remove("on"));
-  b.classList.add("on"); $("#" + b.dataset.t).classList.add("on");
-  try { localStorage.setItem("tab", b.dataset.t); } catch (e) {}
-  if (b.dataset.t === "contacts") loadContacts();
-  if (b.dataset.t === "channels") loadChannels();
-  if (b.dataset.t === "radio") loadStats();
-});
-try { const t = localStorage.getItem("tab"); if (t) document.querySelector(`#tabs button[data-t=${t}]`)?.click(); } catch (e) {}
+// ---------------- navigation
+function go(v) {
+  view = v; $$(".view").forEach(x => x.classList.toggle("on", x.id === "v-" + v));
+  $$("#nav button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+  $("#menu").classList.remove("on");
+  if (v === "contacts") renderContacts();
+  if (v === "channels") loadChannels();
+  if (v === "map") showMap();
+  if (v === "settings") { loadStats(); fillSettings(); }
+  if (v === "gateway") renderGateway();
+  setTitle();
+}
+function setTitle() {
+  const me = S.self || {}, inChat = view === "chats" && conv && !wide();
+  $("#title").textContent = {settings: "Settings", gateway: "Gateway"}[view] || (inChat ? convLabel(conv) : me.name || "Mesh Radio");
+  $("#backBtn").style.display = view === "settings" || view === "gateway" || inChat ? "grid" : "none";
+  document.title = (me.name || "Mesh Radio") + " · Mesh Radio";
+}
+$$("#nav button").forEach(b => b.onclick = () => { if (b.dataset.v === "chats" && view === "chats" && !wide()) closeChat(); go(b.dataset.v); });
+$("#backBtn").onclick = () => view === "chats" ? closeChat() : go("chats");
+$("#menuBtn").onclick = e => { e.stopPropagation(); $("#menu").classList.toggle("on"); };
+document.addEventListener("click", e => { if (!e.target.closest("#menu")) $("#menu").classList.remove("on"); });
+$$("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
+$$("[data-adv]").forEach(b => b.onclick = () => act(b, () => api("advert", {flood: b.dataset.adv === "1"}),
+  b.dataset.adv === "1" ? "Flood advert sent" : "Zero-hop advert sent"));
+$("#advBtn").onclick = () => act($("#advBtn"), () => api("advert", {flood: false}), "Zero-hop advert sent");
+$("#mRefresh").onclick = () => { $("#menu").classList.remove("on"); loadContacts(true); };
+addEventListener("resize", setTitle);
 
-// ---- state
+// ---------------- state
 async function loadState() {
   try { S = await api("state"); } catch (e) { S = {connected: false, err: e.message}; }
-  const c = $("#conn");
-  c.innerHTML = S.connected
-    ? `<span class="dot" style="background:var(--good)"></span>connected on ${esc(S.port)}`
-    : `<span class="dot" style="background:var(--bad)"></span>${esc(S.err || "radio not connected")}`;
   const me = S.self || {};
-  if (me.name) { $("#title").textContent = me.name; document.title = me.name + " · Mesh Radio"; }
-  $("#hdr").textContent = me.radio_freq ? `${me.radio_freq} MHz · BW ${me.radio_bw} · SF${me.radio_sf} · ${me.tx_power} dBm` : "";
-  renderGateway(); renderInfo();
+  $("#status").innerHTML = S.connected
+    ? `<span class="dot" style="background:#4ade80"></span>Connected · ${esc(S.port)}${me.radio_freq ? ` · ${me.radio_freq} MHz · SF${me.radio_sf} · ${me.tx_power} dBm` : ""}`
+    : `<span class="dot" style="background:#f87171"></span>${esc(S.err || "Radio not connected")}`;
+  setTitle(); if (view === "gateway") renderGateway();
 }
 
-// ---- messages
-async function loadMessages() {
-  try {
-    const r = await api("messages?since=" + lastId);
-    if (!r.messages.length) return;
-    msgs.push(...r.messages); lastId = msgs[msgs.length-1].id;
-    if (msgs.length > 2000) msgs = msgs.slice(-2000);
-    renderFeed(); renderSendTo(); renderFilter();
-  } catch (e) {}
-}
-function convKey(m) { return m.kind === "chan" ? "ch:" + m.ch : "dm:" + (m.peer || "").slice(0,12); }
+// ---------------- chats
+const convKey = m => m.kind === "chan" ? "ch:" + m.ch : "dm:" + (m.peer || "").slice(0, 12);
 function convLabel(k) {
-  if (k.startsWith("ch:")) { const i = +k.slice(3); const ch = channels.find(c => c.idx === i);
-    return "Channel " + i + (ch ? " " + ch.name : "") + (i === S.bridge_channel ? " (gateway)" : ""); }
-  const kp = k.slice(3); return "DM " + (nameOf(kp) || msgs.find(m => convKey(m) === k && m.name)?.name || kp);
-}
-function renderFilter() {
-  const sel = $("#filter"), cur = sel.value, keys = [...new Set(msgs.map(convKey))];
-  sel.innerHTML = '<option value="">Everything</option>' + keys.map(k => `<option value="${esc(k)}">${esc(convLabel(k))}</option>`).join("");
-  sel.value = keys.includes(cur) ? cur : "";
-}
-function renderFeed() {
-  const f = $("#filter").value, hide = $("#hideBridge").checked, feed = $("#feed");
-  const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
-  const rows = msgs.filter(m => (!f || convKey(m) === f) && !(hide && isGateway(m)));
-  feed.innerHTML = rows.slice(-500).map(m => {
-    const who = m.dir === "out"
-      ? (m.kind === "chan" ? `→ channel ${m.ch}` : `→ ${esc(m.name || m.peer)}`) + (m.via === "bridge" ? " · gateway" : "")
-      : (m.kind === "chan" ? `${esc(m.name || "?")} · channel ${m.ch}` : esc(m.name || nameOf(m.peer) || m.peer));
-    const extra = [m.snr != null ? "SNR " + m.snr : "", m.hops != null && m.hops !== 255 ? route(m.hops) : "",
-      m.acked === false ? '<span class="bad">not acked</span>' : m.acked ? '<span class="good">✓</span>' : ""].filter(Boolean).join(" · ");
-    return `<div class="msg ${m.dir}"><div class="h">${who} · ${hhmm(m.t)}${extra ? " · " + extra : ""}</div><div class="t">${esc(m.text)}</div></div>`;
-  }).join("") || '<p class="meta">No messages yet.</p>';
-  if (atBottom || !renderFeed.done) feed.scrollTop = feed.scrollHeight;
-  renderFeed.done = true;
+  if (k.startsWith("ch:")) { const i = +k.slice(3), c = channels.find(x => x.idx === i); return c ? c.name : "Channel " + i; }
+  const kp = k.slice(3); if (nameOf(kp)) return nameOf(kp);
+  for (let i = msgs.length - 1; i >= 0; i--) if (convKey(msgs[i]) === k && msgs[i].name) return msgs[i].name;
+  return kp;
 }
 // Gateway traffic: what the bridge sends, every DM it receives (all DMs to
 // this radio go to the gateway) and anything on its private channel.
-const isGateway = m => m.via === "bridge" || (m.dir === "in" && m.kind === "dm") || (m.kind === "chan" && m.ch === S.bridge_channel && m.via !== "web");
-$("#filter").onchange = renderFeed; $("#hideBridge").onchange = renderFeed;
-function renderSendTo() {
-  const sel = $("#sendTo"), cur = sel.value;
-  const chans = channels.length ? channels : [{idx: 0, name: "Public"}];
-  const people = contacts.filter(c => c.type_id === 1 || c.type_id === 3);
-  sel.innerHTML = chans.map(c => `<option value="ch:${c.idx}">Channel ${c.idx} ${esc(c.name)}</option>`).join("") +
-    people.map(c => `<option value="dm:${c.key}">DM ${esc(c.name)}</option>`).join("");
-  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
-  else { const f = $("#filter").value; if (f.startsWith("ch:")) sel.value = f; }
+const isGw = m => m.via === "bridge" || (m.dir === "in" && m.kind === "dm") || (m.kind === "chan" && m.ch === S.bridge_channel && m.via !== "web");
+function convs() {
+  const by = {};
+  for (const m of msgs) { const k = convKey(m); const c = by[k] ||= {k, last: null, unread: 0, gw: true};
+    c.last = m; if (!isGw(m)) c.gw = false; if (m.dir === "in" && m.id > (seen[k] || 0) && k !== conv) c.unread++; }
+  for (const ch of channels) { const k = "ch:" + ch.idx; by[k] ||= {k, last: null, unread: 0, gw: ch.idx === S.bridge_channel}; }
+  return Object.values(by).sort((a, b) => (b.last?.t || 0) - (a.last?.t || 0));
 }
-$("#sendText").oninput = e => $("#sendLen").textContent = new TextEncoder().encode(e.target.value).length + "/140";
-$("#sendText").onkeydown = e => { if (e.key === "Enter") $("#sendBtn").click(); };
+function renderConvs() {
+  const q = $("#chatSearch").value.toLowerCase(), hide = $("#hideGw").checked, all = convs();
+  const list = all.filter(c => (!q || convLabel(c.k).toLowerCase().includes(q)) && !(hide && c.gw && c.k.startsWith("dm:")));
+  const total = all.reduce((a, c) => a + c.unread, 0);
+  $("#unreadBadge").hidden = !total; $("#unreadBadge").textContent = total > 99 ? "99+" : total;
+  $("#convList").innerHTML = list.map(c => {
+    const ch = c.k.startsWith("ch:") ? +c.k.slice(3) : null, ct = ch == null ? contactBy(c.k.slice(3)) : null;
+    const m = c.last, prev = m ? (m.dir === "out" ? (m.via === "bridge" ? "Gateway: " : "You: ") : m.kind === "chan" && m.name ? m.name + ": " : "") + m.text : "No messages yet";
+    return `<button class="item${conv === c.k ? " sel" : ""}" data-conv="${esc(c.k)}">${avatar(convLabel(c.k), ct ? ct.type_id : 1, ch)}
+      <div class="body"><div class="l1"><b>${esc(convLabel(c.k))}</b><span>${m ? ago(m.t) : ""}</span></div>
+      <div class="l2"><span class="txt">${esc(prev.replace(/\n/g, " "))}</span>${c.unread ? `<span class="unread">${c.unread}</span>` : ""}</div></div></button>`;
+  }).join("") || `<div class="empty"><svg><use href="#i-chat"/></svg><p>No chats yet</p></div>`;
+}
+$("#chatSearch").oninput = renderConvs;
+try { $("#hideGw").checked = !!localStorage.getItem("hideGw"); } catch (e) {}
+$("#hideGw").onchange = () => { try { localStorage.setItem("hideGw", $("#hideGw").checked ? "1" : ""); } catch (e) {} renderConvs(); };
+$("#convList").onclick = e => { const b = e.target.closest("[data-conv]"); if (b) openChat(b.dataset.conv); };
+function openChat(k) {
+  conv = k; $("#v-chats").classList.add("chatting");
+  $("#chatNone").hidden = true; $("#feed").hidden = false; $("#composer").hidden = false; $("#chatHead").hidden = false;
+  const ch = k.startsWith("ch:") ? +k.slice(3) : null, ct = ch == null ? contactBy(k.slice(3)) : null;
+  $("#chatAv").innerHTML = avatar(convLabel(k), ct ? ct.type_id : 1, ch);
+  $("#chatName").textContent = convLabel(k);
+  $("#chatSub").textContent = ch == null ? (ct ? `${ct.type} · ${route(ct.hops)} · ` : "") + k.slice(3) : `slot ${ch}` + (ch === S.bridge_channel ? " · gateway private channel" : "");
+  go("chats"); renderFeed(true); renderConvs(); $("#msgText").focus();
+}
+function closeChat() { conv = null; $("#v-chats").classList.remove("chatting"); $("#chatNone").hidden = false;
+  $("#feed").hidden = true; $("#composer").hidden = true; $("#chatHead").hidden = true; renderConvs(); setTitle(); }
+function renderFeed(jump) {
+  if (!conv) return;
+  const feed = $("#feed"), atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
+  const rows = msgs.filter(m => convKey(m) === conv).slice(-400);
+  let lastDay = "";
+  feed.innerHTML = rows.map(m => {
+    const d = dayOf(m.t), sep = d !== lastDay ? `<div class="day">${d}</div>` : ""; lastDay = d;
+    const who = m.dir === "in" && m.kind === "chan" ? `<div class="who">${esc(m.name || "?")}</div>` : "";
+    const meta = [m.via === "bridge" ? "gateway" : "", m.snr != null ? "SNR " + m.snr : "",
+      m.hops != null && m.hops >= 0 && m.hops < 64 ? route(m.hops).toLowerCase() : "", clock(m.t),
+      m.acked === false ? '<span class="bad">✕ not delivered</span>' : m.acked ? '<span class="good">✓✓</span>' : m.dir === "out" ? "✓" : ""].filter(Boolean).join(" · ");
+    return sep + `<div class="msg ${m.dir}${m.via === "bridge" ? " gw" : ""}">${who}<div class="t">${esc(m.text)}</div><div class="m">${meta}</div></div>`;
+  }).join("") || `<div class="empty">No messages yet.</div>`;
+  if (jump || atBottom) feed.scrollTop = feed.scrollHeight;
+  if (rows.length) { seen[conv] = Math.max(seen[conv] || 0, rows[rows.length - 1].id); saveSeen(); }
+}
+$("#msgText").oninput = e => $("#msgLen").textContent = new TextEncoder().encode(e.target.value).length + "/140";
+$("#msgText").onkeydown = e => { if (e.key === "Enter") $("#sendBtn").click(); };
 $("#sendBtn").onclick = () => {
-  const to = $("#sendTo").value, text = $("#sendText").value.trim(); if (!text) return;
-  const body = to.startsWith("ch:") ? {channel: +to.slice(3), text} : {to: to.slice(3), text};
-  if (body.channel === S.bridge_channel && !confirm("This is the gateway's private channel. Every user on it will see this. Send?")) return;
-  act($("#sendBtn"), () => api("send", body), r => r.acked === false ? "Sent, but not acknowledged" : "Sent")
-    .then(r => { if (r) { $("#sendText").value = ""; $("#sendLen").textContent = "0/140"; loadMessages(); } });
+  const text = $("#msgText").value.trim(); if (!text || !conv) return;
+  if (new TextEncoder().encode(text).length > 140) return toast("Too long for one mesh message (140 bytes)", true);
+  const body = conv.startsWith("ch:") ? {channel: +conv.slice(3), text} : {to: (contactBy(conv.slice(3)) || {}).key || conv.slice(3), text};
+  if (body.channel === S.bridge_channel && !confirm("This is the gateway's private channel. Everyone on it sees this. Send?")) return;
+  act($("#sendBtn"), () => api("send", body), r => r.acked === false ? "Sent, but not delivered" : null)
+    .then(r => { if (r) { $("#msgText").value = ""; $("#msgLen").textContent = "0/140"; loadMessages(); } });
 };
+async function loadMessages() {
+  try { const r = await api("messages?since=" + lastId); if (!r.messages.length) return;
+    msgs.push(...r.messages); lastId = msgs[msgs.length - 1].id; if (msgs.length > 2000) msgs = msgs.slice(-2000);
+    renderConvs(); renderFeed();
+  } catch (e) {}
+}
 
-// ---- contacts
-async function loadContacts() {
+// ---------------- contacts
+async function loadContacts(announce) {
   try { const r = await api("contacts"); contacts = r.contacts;
-    $("#pending").innerHTML = r.pending.length ? "Heard but not added: " + r.pending.map(k =>
-      `<span class="mono">${esc(k.slice(0,12))}</span> <button class="b" data-add="${esc(k)}">Add</button>`).join(" ") : "";
-    renderContacts(); renderSendTo(); renderFeed(); renderGateway();
+    $("#cPending").innerHTML = r.pending.length ? `<div class="count">Heard, not added</div><div class="list">` + r.pending.map(k =>
+      `<div class="item">${avatar("?")}<div class="body"><div class="l1"><b class="mono">${esc(k.slice(0, 12))}</b></div></div><button class="btn" data-addp="${esc(k)}">Add</button></div>`).join("") + "</div>" : "";
+    renderContacts(); renderConvs(); if (conv) $("#chatName").textContent = convLabel(conv);
+    if (announce) toast(`${contacts.length} contacts`);
   } catch (e) { toast(e.message, true); }
 }
 function renderContacts() {
-  const q = $("#csearch").value.toLowerCase();
-  const rows = contacts.filter(c => !q || c.name.toLowerCase().includes(q) || c.key.includes(q));
-  $("#ccount").textContent = `(${rows.length} of ${contacts.length})`;
-  $("#ctable tbody").innerHTML = rows.map(c => `<tr>
-    <td>${esc(c.name)}</td><td><span class="chip">${esc(c.type)}</span></td>
-    <td class="mono">${esc(c.key.slice(0,12))}</td><td>${ago(c.last_advert)}</td>
-    <td title="${esc(c.path)}">${route(c.hops)}</td>
-    <td class="row" style="justify-content:flex-end">
-      ${c.type_id === 1 || c.type_id === 3 ? `<button class="b" data-dm="${c.key}">Message</button>` : ""}
-      ${c.type_id === 2 || c.type_id === 3 ? `<button class="b" data-admin="${c.key}">Admin</button>` : ""}
-      ${c.hops >= 0 ? `<button class="b" data-reset="${c.key}">Reset route</button>` : ""}
-      <button class="b bad" data-rm="${c.key}">Remove</button></td></tr>`).join("");
+  const q = $("#cSearch").value.toLowerCase(), sort = $("#cSort").value, now = Date.now()/1000;
+  const rows = contacts.filter(c => (!cFilter || c.type_id === +cFilter) && (!q || c.name.toLowerCase().includes(q) || c.key.includes(q)));
+  const heard = c => Math.min(c.last_advert || 0, now);
+  rows.sort(sort === "name" ? (a, b) => a.name.localeCompare(b.name) : (a, b) => heard(b) - heard(a));
+  $("#cCount").textContent = `${rows.length} of ${contacts.length} contacts`;
+  $("#cList").innerHTML = rows.map(c => `<button class="item" data-ct="${c.key}">${avatar(c.name, c.type_id)}
+    <div class="body"><div class="l1"><b>${esc(c.name)}</b><span>${ago(c.last_advert)}</span></div>
+    <div class="l2"><span class="txt">${esc(c.type)} · ${route(c.hops)}</span><span class="mono">${c.key.slice(0, 8)}</span></div></div></button>`).join("")
+    || `<div class="empty"><svg><use href="#i-person"/></svg><p>No contacts</p></div>`;
 }
-$("#csearch").oninput = renderContacts; $("#crefresh").onclick = loadContacts;
-document.addEventListener("click", e => {
-  const d = e.target.dataset; if (!d) return;
-  if (d.dm) { document.querySelector("#tabs button[data-t=messages]").click(); renderSendTo();
-    $("#sendTo").value = "dm:" + d.dm; $("#filter").value = "dm:" + d.dm.slice(0,12); renderFeed(); $("#sendText").focus(); }
-  if (d.reset) act(e.target, () => api("contact/reset-path", {key: d.reset}), "Route reset; next message floods").then(loadContacts);
-  if (d.rm && confirm("Remove " + (nameOf(d.rm) || d.rm.slice(0,12)) + " from this radio's contacts?"))
-    act(e.target, () => api("contact/remove", {key: d.rm}), "Removed").then(loadContacts);
-  if (d.add) act(e.target, () => api("contact/add-pending", {key: d.add}), "Added").then(loadContacts);
-  if (d.admin) { adminKey = d.admin; $("#admin").hidden = false; $("#aname").textContent = nameOf(d.admin);
-    $("#akey").textContent = d.admin.slice(0,12); $("#aout").hidden = true; $("#apwd").focus(); }
-  if (d.approve || d.deny) { const cmd = d.approve ? "APPROVE" : "DENY", call = d.approve || d.deny;
-    if (confirm(`${cmd === "APPROVE" ? "Approve" : "Deny"} ${call}? Their radio gets a DM saying so.`))
-      act(e.target, () => api("member", {action: cmd, callsign: call}), call + (cmd === "APPROVE" ? " approved" : " denied")).then(loadState); }
-  if (d.ch !== undefined && e.target.tagName === "BUTTON") { const c = channels.find(x => x.idx === +d.ch);
-    $("#chIdx").value = d.ch; $("#chName").value = c ? c.name : ""; $("#chSecret").value = ""; $("#chName").focus(); }
-});
-function aout(t) { const o = $("#aout"); o.hidden = false; o.textContent = t; }
-$("#alogin").onclick = () => act($("#alogin"), () => api("repeater/login", {key: adminKey, password: $("#apwd").value}), "Logged in")
-  .then(r => r && aout("Logged in.\n" + JSON.stringify(r.payload, null, 1)));
-$("#astatus").onclick = () => act($("#astatus"), () => api("repeater/status", {key: adminKey}))
-  .then(r => r && aout(fmtStatus(r.status)));
-$("#acmdBtn").onclick = () => act($("#acmdBtn"), () => api("repeater/cmd", {key: adminKey, cmd: $("#acmd").value}))
-  .then(r => r && aout("> " + $("#acmd").value + "\n" + r.reply));
-$("#acmd").onkeydown = e => { if (e.key === "Enter") $("#acmdBtn").click(); };
+$("#cSearch").oninput = renderContacts; $("#cSort").onchange = renderContacts;
+$$("#cChips .chip[data-f]").forEach(b => b.onclick = () => { cFilter = b.dataset.f; $$("#cChips .chip[data-f]").forEach(x => x.classList.toggle("on", x === b)); renderContacts(); });
+$("#cList").onclick = e => { const b = e.target.closest("[data-ct]"); if (b) contactSheet(b.dataset.ct); };
+$("#cPending").onclick = e => { const k = e.target.dataset.addp; if (k) act(e.target, () => api("contact/add-pending", {key: k}), "Added").then(() => loadContacts()); };
+
+// ---------------- sheet
+function sheet(html) { $("#sheet").innerHTML = html; $("#scrim").classList.add("on"); }
+function closeSheet() { $("#scrim").classList.remove("on"); }
+$("#scrim").onclick = e => { if (e.target.id === "scrim" || e.target.closest("[data-close]")) closeSheet(); };
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
+const sheetHead = (av, name, sub) => `<div class="hd">${av}<div class="body"><b>${esc(name)}</b><div class="mono" style="color:var(--muted)">${esc(sub)}</div></div>
+  <button class="icon-btn" data-close title="Close"><svg class="i"><use href="#i-close"/></svg></button></div>`;
+function contactSheet(key) {
+  const c = contacts.find(x => x.key === key); if (!c) return;
+  const admin = c.type_id === 2 || c.type_id === 3, chat = c.type_id === 1 || c.type_id === 3;
+  const hop = c.path && c.hops > 0 ? c.path.length / 2 / c.hops : 1;
+  sheet(sheetHead(avatar(c.name, c.type_id), c.name, c.key.slice(0, 16) + "…") + `
+    <div class="kv"><div><span>Type</span><span>${esc(c.type)}</span></div>
+      <div><span>Last advert</span><span>${c.last_advert > 1e9 ? new Date(c.last_advert*1000).toLocaleString() : "never"}</span></div>
+      <div><span>Route</span><span>${route(c.hops)}</span></div>
+      ${c.path ? `<div><span>Path</span><span class="mono">${esc(c.path.match(new RegExp(`.{1,${hop * 2}}`, "g")).join(" › "))}</span></div>` : ""}
+      ${c.lat ? `<div><span>Position</span><span>${c.lat.toFixed(4)}, ${c.lon.toFixed(4)}</span></div>` : ""}</div>
+    <div class="btns">${chat ? `<button class="btn pri" id="kMsg">Message</button>` : ""}
+      ${c.lat ? `<button class="btn" id="kMap">Show on map</button>` : ""}
+      ${c.hops >= 0 ? `<button class="btn" id="kReset">Reset route</button>` : ""}
+      <button class="btn bad" id="kRm">Remove</button></div>
+    ${admin ? `<h4>Remote admin</h4>
+      <div class="field"><label>Password (admin or guest)</label><input id="kPwd" type="password" autocomplete="off"></div>
+      <div class="btns"><button class="btn" id="kLogin">Log in</button><button class="btn" id="kStatus">Status</button></div>
+      <div class="field"><label>CLI command</label><input id="kCmd" placeholder="ver, neighbors, get name, clock"></div>
+      <div class="btns"><button class="btn pri" id="kRun">Run</button></div><pre class="out" id="kOut" hidden></pre>` : ""}`);
+  const out = t => { const o = $("#kOut"); o.hidden = false; o.textContent = t; };
+  if (chat) $("#kMsg").onclick = () => { closeSheet(); openChat("dm:" + c.key.slice(0, 12)); };
+  if ($("#kMap")) $("#kMap").onclick = () => { closeSheet(); go("map"); setTimeout(() => map && map.setView([c.lat, c.lon], 13), 60); };
+  if ($("#kReset")) $("#kReset").onclick = e => act(e.target, () => api("contact/reset-path", {key}), "Route reset; the next message floods").then(() => loadContacts());
+  $("#kRm").onclick = e => { if (confirm(`Remove ${c.name} from this radio's contacts?`))
+    act(e.target, () => api("contact/remove", {key}), "Removed").then(r => { if (r) { closeSheet(); loadContacts(); } }); };
+  if (admin) {
+    $("#kLogin").onclick = e => act(e.target, () => api("repeater/login", {key, password: $("#kPwd").value}), "Logged in").then(r => r && out("Logged in."));
+    $("#kStatus").onclick = e => act(e.target, () => api("repeater/status", {key})).then(r => r && out(fmtStatus(r.status)));
+    $("#kRun").onclick = e => act(e.target, () => api("repeater/cmd", {key, cmd: $("#kCmd").value})).then(r => r && out("> " + $("#kCmd").value + "\n" + r.reply));
+    $("#kCmd").onkeydown = e => { if (e.key === "Enter") $("#kRun").click(); };
+  }
+}
 function fmtStatus(s) {
   if (!s) return "No status.";
   const L = [];
@@ -387,106 +547,140 @@ function fmtStatus(s) {
   if (s.last_rssi != null) L.push(`Last RSSI ${s.last_rssi}, SNR ${s.last_snr}`);
   if (s.nb_recv != null) L.push(`Packets in ${s.nb_recv}, out ${s.nb_sent}`);
   if (s.airtime != null) L.push(`TX airtime ${s.airtime} s, RX ${s.rx_airtime ?? "?"} s`);
-  return L.join("\n") + "\n\n" + JSON.stringify(s, null, 1);
+  return L.join("\n") || JSON.stringify(s, null, 1);
 }
 
-// ---- channels
+// ---------------- channels
 async function loadChannels() {
-  try { const r = await api("channels"); channels = r.channels;
-    $("#chtable tbody").innerHTML = channels.map(c => `<tr><td>${c.idx}</td><td>${esc(c.name)}${c.idx === r.bridge_channel ? ' <span class="chip">gateway</span>' : ""}</td>
-      <td class="mono">${esc(c.hash)}</td><td><button class="b" data-ch="${c.idx}">Edit</button></td></tr>`).join("");
-    const used = new Set(channels.map(c => c.idx)); let free = 0; while (used.has(free)) free++;
-    if ($("#chIdx").value === "") $("#chIdx").value = free;
-    renderSendTo(); renderFilter(); renderFeed();
-  } catch (e) { toast(e.message, true); }
+  try { const r = await api("channels"); channels = r.channels; renderChannels(); renderConvs(); } catch (e) { toast(e.message, true); }
 }
-$("#chSave").onclick = () => {
-  const idx = +$("#chIdx").value, body = {idx, name: $("#chName").value, secret: $("#chSecret").value.trim()};
-  if (idx === S.bridge_channel) {
-    if (!confirm(`Slot ${idx} is the gateway's private channel. Changing it cuts off every user on it. Continue?`)) return;
-    body.confirm = "BRIDGE CHANNEL";
-  }
-  act($("#chSave"), () => api("channel", body), "Channel saved").then(r => { if (r) { $("#chSecret").value = ""; loadChannels(); } });
-};
+function renderChannels() {
+  $("#chList").innerHTML = channels.map(c => `<div class="item" data-chopen="${c.idx}">${avatar(c.name, 0, c.idx)}
+    <div class="body"><div class="l1"><b>${esc(c.name)}</b><span>slot ${c.idx}</span></div>
+    <div class="l2"><span class="txt">${c.idx === S.bridge_channel ? "Gateway private channel" : c.name.startsWith("#") ? "Public hashtag channel" : c.idx === 0 ? "Public channel" : "Private channel"}</span></div></div>
+    <button class="btn" data-chedit="${c.idx}">Edit</button></div>`).join("") || `<div class="empty"><svg><use href="#i-hash"/></svg><p>No channels</p></div>`;
+}
+$("#chList").onclick = e => { const ed = e.target.closest("[data-chedit]"); if (ed) return channelSheet(+ed.dataset.chedit);
+  const o = e.target.closest("[data-chopen]"); if (o) openChat("ch:" + o.dataset.chopen); };
+$("#chAdd").onclick = () => { const used = new Set(channels.map(c => c.idx)); let i = 0; while (used.has(i)) i++; channelSheet(i, true); };
+function channelSheet(idx, isNew) {
+  const c = channels.find(x => x.idx === idx) || {name: ""};
+  sheet(sheetHead(avatar("", 0, idx), isNew ? "Add channel" : c.name, "slot " + idx) + `
+    <div class="field"><label>Name</label><input id="eName" value="${esc(c.name)}" placeholder="#hashtag (public) or a private name"></div>
+    <div class="field"><label>Secret key, 32 hex characters. ${isNew ? "Blank makes a new random key (or the #hashtag key)." : "Blank keeps the current key."}</label><input id="eSecret" class="mono" autocomplete="off"></div>
+    <p class="count" style="margin:4px 16px">A name starting with # is a public hashtag channel; its key comes from the name.</p>
+    <div class="btns"><button class="btn pri" id="eSave">Save</button>${isNew ? "" : `<button class="btn bad" id="eDel">Remove channel</button>`}</div>`);
+  const save = (btn, body, msg) => {
+    if (idx === S.bridge_channel) { if (!confirm(`Slot ${idx} is the gateway's private channel. Changing it cuts off everyone on it. Continue?`)) return; body.confirm = "BRIDGE CHANNEL"; }
+    act(btn, () => api("channel", body), msg).then(r => { if (r) { closeSheet(); loadChannels(); } }); };
+  $("#eSave").onclick = e => { const name = $("#eName").value.trim(); if (!name) return toast("Name is empty", true);
+    save(e.target, {idx, name, secret: $("#eSecret").value.trim()}, "Channel saved"); };
+  if (!isNew) $("#eDel").onclick = e => { if (confirm(`Remove channel ${c.name}?`)) save(e.target, {idx, name: "", clear: true}, "Channel removed"); };
+}
 
-// ---- radio
-let stats = {};
-async function loadStats() { try { stats = await api("stats"); } catch (e) { toast(e.message, true); } renderInfo(true); }
-function renderInfo(fillForm) {
+// ---------------- map
+let map, layer;
+function showMap() {
+  if (!window.L) { $("#map").innerHTML = '<div class="empty">The map needs internet access to load.</div>'; return; }
+  if (!map) {
+    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    map = L.map("map").setView([26.4, -80.1], 9);
+    L.tileLayer(`https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${dark ? "Dark" : "Light"}_Gray_Base/MapServer/tile/{z}/{y}/{x}`,
+      {maxZoom: 16, attribution: "Tiles © Esri"}).addTo(map);
+    layer = L.layerGroup().addTo(map);
+  }
+  setTimeout(() => map.invalidateSize(), 30);
+  layer.clearLayers();
+  const pts = [];
+  for (const c of contacts) {
+    if (!c.lat || !c.lon) continue;
+    L.circleMarker([c.lat, c.lon], {radius: 7, color: "#fff", weight: 1.5, fillColor: css((TYPES[c.type_id] || TYPES[1])[2]), fillOpacity: .95})
+      .bindPopup(`<b>${esc(c.name)}</b><br>${esc(c.type)} · ${route(c.hops)}<br>Last advert ${ago(c.last_advert)}`).addTo(layer);
+    pts.push([c.lat, c.lon]);
+  }
+  const me = S.self || {};
+  if (me.adv_lat) { L.circleMarker([me.adv_lat, me.adv_lon], {radius: 9, color: "#fff", weight: 2, fillColor: "#e5534b", fillOpacity: 1})
+    .bindPopup(`<b>${esc(me.name)}</b><br>This radio`).addTo(layer); pts.push([me.adv_lat, me.adv_lon]); }
+  if (pts.length && !showMap.fitted) {
+    // First view: the local cluster around the median, not a stray far-away node.
+    const med = i => pts.map(p => p[i]).sort((x, y) => x - y)[pts.length >> 1], c = [med(0), med(1)];
+    const near = pts.filter(p => Math.abs(p[0] - c[0]) < 3 && Math.abs(p[1] - c[1]) < 3);
+    map.fitBounds(near.length ? near : pts, {padding: [30, 30], maxZoom: 12}); showMap.fitted = true;
+  }
+}
+
+// ---------------- settings
+async function loadStats() { try { stats = await api("stats"); } catch (e) { toast(e.message, true); } renderInfo(); }
+function renderInfo() {
   const me = S.self || {}, d = S.device || {}, b = stats.battery || {}, core = stats.core || {}, rad = stats.radio || {}, pk = stats.packets || {};
-  const kv = [["Name", me.name], ["Public key", me.public_key ? `<span class="mono">${esc(me.public_key.slice(0,16))}…</span>` : ""],
-    ["Model", d.model], ["Firmware", [d.ver, d.fw_build].filter(Boolean).join(" ")],
-    ["Frequency", me.radio_freq && me.radio_freq + " MHz"], ["Bandwidth", me.radio_bw && me.radio_bw + " kHz"],
-    ["Spreading / coding", me.radio_sf && `SF${me.radio_sf} / CR${me.radio_cr}`],
-    ["TX power", me.tx_power != null && `${me.tx_power} dBm (max ${me.max_tx_power})`],
-    ["Position", me.adv_lat ? `${me.adv_lat.toFixed(5)}, ${me.adv_lon.toFixed(5)}` : "not set"],
-    ["Auto-add contacts", me.manual_add_contacts === undefined ? "" : me.manual_add_contacts ? "off" : "on"],
-    ["Path hash", d.path_hash_mode != null && (d.path_hash_mode + 1) + " byte" + (d.path_hash_mode ? "s" : "")],
-    ["Max contacts / channels", d.max_contacts && `${d.max_contacts} / ${d.max_channels}`],
-    ["Battery", b.level != null ? (b.level > 100 ? (b.level/1000).toFixed(2) + " V" : b.level + "%") : ""],
+  const kv = [["Model", d.model], ["Firmware", [d.ver, d.fw_build].filter(Boolean).join(" · ")],
+    ["Public key", me.public_key && me.public_key.slice(0, 16) + "…"],
+    ["Battery", b.level != null && (b.level > 100 ? (b.level/1000).toFixed(2) + " V" : b.level + "%")],
     ["Storage", b.used_kb != null && `${b.used_kb} of ${b.total_kb} KB`],
     ["Uptime", core.uptime_secs != null && (core.uptime_secs/3600).toFixed(1) + " h"],
-    ["Battery (core)", core.battery_mv && (core.battery_mv/1000).toFixed(2) + " V"],
-    ["TX queue / errors", core.queue_len != null && `${core.queue_len} / ${core.errors}`],
     ["Noise floor", rad.noise_floor != null && rad.noise_floor + " dBm"],
     ["Last RSSI / SNR", rad.last_rssi != null && `${rad.last_rssi} / ${rad.last_snr}`],
     ["Airtime TX / RX", rad.tx_air_secs != null && `${rad.tx_air_secs} s / ${rad.rx_air_secs} s`],
     ["Packets in / out", pk.recv != null && `${pk.recv} / ${pk.sent}`],
-    ["Flood / direct out", pk.flood_tx != null && `${pk.flood_tx} / ${pk.direct_tx}`]];
-  $("#info").innerHTML = kv.filter(x => x[1]).map(([k, v]) => `<div class="kv"><span>${k}</span><span>${typeof v === "string" && v.startsWith("<") ? v : esc(v)}</span></div>`).join("");
-  if (fillForm || !renderInfo.filled) if (me.name) {
-    renderInfo.filled = true;
-    $("#sName").value = me.name; $("#sLat").value = me.adv_lat || ""; $("#sLon").value = me.adv_lon || "";
-    if (d.path_hash_mode != null) $("#sHash").value = d.path_hash_mode; $("#sTx").value = me.tx_power; $("#sTx").max = me.max_tx_power; $("#sAuto").checked = !me.manual_add_contacts;
-    $("#rFreq").value = me.radio_freq; $("#rBw").value = me.radio_bw; $("#rSf").value = me.radio_sf; $("#rCr").value = me.radio_cr;
-  }
+    ["Flood / direct out", pk.flood_tx != null && `${pk.flood_tx} / ${pk.direct_tx}`],
+    ["Contacts", d.max_contacts && `${contacts.length} of ${d.max_contacts}`],
+    ["Channels", d.max_channels && `${channels.length} of ${d.max_channels}`],
+    ["TX queue / errors", core.queue_len != null && `${core.queue_len} / ${core.errors}`]];
+  $("#info").innerHTML = kv.filter(x => x[1]).map(([k, v]) => `<div><span>${k}</span><span>${esc(v)}</span></div>`).join("");
 }
-$("#statsBtn").onclick = () => loadStats();
-$("#sSave").onclick = () => {
-  const me = S.self || {}, body = {};
-  if ($("#sName").value !== me.name) body.name = $("#sName").value;
-  if ($("#sLat").value != (me.adv_lat || "") || $("#sLon").value != (me.adv_lon || "")) { body.lat = $("#sLat").value; body.lon = $("#sLon").value; }
-  if (+$("#sTx").value !== me.tx_power) body.tx_power = +$("#sTx").value;
-  if ($("#sAuto").checked === !!me.manual_add_contacts) body.manual_add = !$("#sAuto").checked;
-  if (S.device && S.device.path_hash_mode != null && +$("#sHash").value !== S.device.path_hash_mode) body.path_hash_mode = +$("#sHash").value;
-  if (!Object.keys(body).length) return toast("Nothing changed");
-  act($("#sSave"), () => api("settings", body), r => "Saved: " + r.changed.join(", ")).then(() => loadState().then(() => renderInfo(true)));
-};
-$("#sAuto").onchange = () => $("#sSave").click();
-$("#sHash").onchange = () => $("#sSave").click();
-$("#advZero").onclick = e => act(e.target, () => api("advert", {flood: false}), "Zero-hop advert sent");
-$("#advFlood").onclick = e => act(e.target, () => api("advert", {flood: true}), "Flood advert sent");
-$("#syncTime").onclick = e => act(e.target, () => api("sync-time", {}), "Radio clock set");
-$("#rSave").onclick = () => {
+function fillSettings() {
+  const me = S.self || {}, d = S.device || {}; if (!me.name) return;
+  $("#sName").value = me.name; $("#sLat").value = me.adv_lat || 0; $("#sLon").value = me.adv_lon || 0;
+  $("#sTx").value = me.tx_power; $("#sTx").max = me.max_tx_power; $("#sTxMax").textContent = `1 to ${me.max_tx_power} dBm`;
+  $("#rFreq").value = me.radio_freq; $("#rBw").value = me.radio_bw; $("#rSf").value = me.radio_sf; $("#rCr").value = me.radio_cr;
+  $("#sAuto").checked = !me.manual_add_contacts; if (d.path_hash_mode != null) $("#sHash").value = d.path_hash_mode;
+}
+const saveSettings = (btn, body) => act(btn, () => api("settings", body), r => "Saved: " + r.changed.join(", "))
+  .then(async () => { await loadState(); fillSettings(); renderInfo(); });
+$("#sSaveId").onclick = e => { const me = S.self || {}, body = {};
+  if ($("#sName").value.trim() !== me.name) body.name = $("#sName").value.trim();
+  if (+$("#sLat").value !== (me.adv_lat || 0) || +$("#sLon").value !== (me.adv_lon || 0)) { body.lat = +$("#sLat").value; body.lon = +$("#sLon").value; }
+  if (!Object.keys(body).length) return toast("Nothing changed"); saveSettings(e.target, body); };
+$("#sHere").onclick = () => navigator.geolocation ? navigator.geolocation.getCurrentPosition(
+  p => { $("#sLat").value = p.coords.latitude.toFixed(5); $("#sLon").value = p.coords.longitude.toFixed(5); toast("Filled in. Press Save identity."); },
+  () => toast("Location not available", true)) : toast("Location not available", true);
+$("#sSaveTx").onclick = e => +$("#sTx").value === (S.self || {}).tx_power ? toast("Nothing changed") : saveSettings(e.target, {tx_power: +$("#sTx").value});
+$("#sHash").onchange = e => saveSettings(null, {path_hash_mode: +e.target.value});
+$("#sAuto").onchange = e => saveSettings(null, {manual_add: !e.target.checked});
+$("#rSave").onclick = e => {
   const radio = {freq: $("#rFreq").value, bw: $("#rBw").value, sf: $("#rSf").value, cr: $("#rCr").value};
   if (prompt("Changing LoRa settings moves this radio off the mesh unless every other node matches.\nType CHANGE RADIO to apply.") !== "CHANGE RADIO") return;
-  act($("#rSave"), () => api("settings", {radio, confirm: "CHANGE RADIO"}), "Radio settings applied").then(loadState);
-};
-$("#reboot").onclick = () => {
-  if (prompt("Reboot the radio? Mesh users are cut off for about 40 s.\nType REBOOT to continue.") !== "REBOOT") return;
-  act($("#reboot"), () => api("reboot", {confirm: "REBOOT"}), "Rebooting; the bridge reconnects on its own");
-};
+  saveSettings(e.target, {radio, confirm: "CHANGE RADIO"}); };
+$("#syncTime").onclick = e => act(e.target, () => api("sync-time", {}), "Radio clock set");
+$("#statsBtn").onclick = () => loadStats();
+$("#reboot").onclick = e => { if (prompt("Reboot the radio? Mesh users are cut off for about 40 s.\nType REBOOT to continue.") !== "REBOOT") return;
+  act(e.target, () => api("reboot", {confirm: "REBOOT"}), "Rebooting; the bridge reconnects on its own"); };
 
-// ---- gateway
+// ---------------- gateway
 function renderGateway() {
   const ss = S.sessions || [];
-  $("#stable tbody").innerHTML = ss.map(s => `<tr><td>${esc(s.name.startsWith("dm:") ? "Guest " + s.name.slice(3) : s.name)}</td>
-    <td class="mono">${esc(s.dest === "channel" ? "channel" : (nameOf(s.dest) || s.dest))}</td>
+  $("#sTable tbody").innerHTML = ss.map(s => `<tr><td>${esc(s.name.startsWith("dm:") ? "Guest " + s.name.slice(3) : s.name)}</td>
+    <td>${esc(s.dest === "channel" ? "channel" : (nameOf(s.dest) || s.dest))}</td>
     <td>${s.open ? '<span class="good">open</span>' : "closed"}</td><td>${s.idle_s != null ? Math.round(s.idle_s/60) + " min" : ""}</td>
-    <td>${s.pages_waiting || ""}</td></tr>`).join("") || '<tr><td colspan="5" class="meta">Nobody since the bridge started.</td></tr>';
-  const ms = Object.entries(S.members || {}).sort((a, b) => (a[1].status === "pending" ? -1 : 0) - (b[1].status === "pending" ? -1 : 0));
-  $("#mtable tbody").innerHTML = ms.map(([kp, m]) => `<tr><td><b>${esc(m.callsign)}</b></td><td>${esc(m.name)}</td><td>${esc(m.oper_class)}</td>
+    <td>${s.pages_waiting || ""}</td></tr>`).join("") || '<tr><td colspan="5" style="color:var(--muted)">Nobody since the bridge started.</td></tr>';
+  const ms = Object.entries(S.members || {}).sort((a, b) => (b[1].status === "pending") - (a[1].status === "pending"));
+  $("#mTable tbody").innerHTML = ms.map(([kp, m]) => `<tr><td><b>${esc(m.callsign)}</b></td><td>${esc(m.name)}</td><td>${esc(m.oper_class)}</td>
     <td class="mono" title="${esc(nameOf(kp))}">${esc(kp)}</td><td>${esc((m.requested || "").replace("T", " "))}</td>
     <td>${m.status === "pending" ? '<span class="warn">pending</span>' : m.status === "approved" ? '<span class="good">approved</span>' : esc(m.status)}${m.verified === false ? ' <span class="bad">(not FCC-verified)</span>' : ""}</td>
-    <td class="row">${m.status !== "approved" ? `<button class="b pri" data-approve="${esc(m.callsign)}">Approve</button>` : ""}
-      ${m.status !== "denied" ? `<button class="b bad" data-deny="${esc(m.callsign)}">Deny</button>` : ""}</td></tr>`).join("")
-    || '<tr><td colspan="7" class="meta">No signups yet.</td></tr>';
-  $("#sysops").innerHTML = Object.entries(S.sysops || {}).map(([n, k]) => `${esc(n)} <span class="mono">${esc(k)}</span>`).join(" · ");
+    <td style="white-space:nowrap">${m.status !== "approved" ? `<button class="btn pri" data-approve="${esc(m.callsign)}">Approve</button>` : ""}
+      ${m.status !== "denied" ? `<button class="btn bad" data-deny="${esc(m.callsign)}">Deny</button>` : ""}</td></tr>`).join("")
+    || '<tr><td colspan="7" style="color:var(--muted)">No signups yet.</td></tr>';
+  $("#sysops").innerHTML = Object.entries(S.sysops || {}).map(([n, k]) => `<div><span>${esc(n)}</span><span class="mono">${esc(k)}</span></div>`).join("");
 }
+$("#mTable").onclick = e => { const d = e.target.dataset; if (!d.approve && !d.deny) return;
+  const cmd = d.approve ? "APPROVE" : "DENY", call = d.approve || d.deny;
+  if (confirm(`${cmd === "APPROVE" ? "Approve" : "Deny"} ${call}? Their radio gets a DM saying so.`))
+    act(e.target, () => api("member", {action: cmd, callsign: call}), call + (cmd === "APPROVE" ? " approved" : " denied")).then(loadState); };
 
-// ---- loop
+// ---------------- start
 (async () => {
   await loadState(); await Promise.all([loadContacts(), loadChannels()]); await loadMessages();
+  go("chats");
   setInterval(loadMessages, 2000); setInterval(loadState, 10000);
 })();
 </script>

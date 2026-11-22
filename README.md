@@ -227,22 +227,26 @@ The bridge holds the radio's COM port, so the official MeshCore app cannot
 connect while it runs. Instead the bridge serves its own page at
 **http://127.0.0.1:8091**, which works over the bridge's connection:
 
-- **Messages:** every DM and channel message in and out, including the
-  gateway's own replies (tick "Hide gateway traffic" to see only other
-  traffic). Send a channel message or a DM from the radio. Kept in
-  `logs/messages.jsonl`.
-- **Contacts:** name, type, last advert, route. Message, reset the route,
-  remove, or add a heard contact.
-- **Repeater and room-server admin:** log in, request status, run CLI
-  commands (`ver`, `neighbors`, `get name`, ...).
-- **Channels:** list, add, change or clear slots. The bridge's own slot
-  asks for confirmation first.
-- **Radio:** model, firmware, battery, uptime, noise floor, airtime and packet
-  counts. Change the name, position, TX power and auto-add. Send a zero-hop or
-  flood advert, set the clock, change the LoRa settings, or reboot (both
-  confirmed).
+It follows the official app's layout: Chats, Contacts, Channels and Map along
+the bottom, Settings and Gateway in the menu, and it fits a phone-width window
+as well as a desktop one (chats list and conversation side by side).
+
+- **Chats:** one conversation per contact and channel, newest first, with
+  unread counts. Messages show SNR, hops and delivery ticks; the gateway's own
+  replies are marked. "Hide gateway sessions" leaves only other traffic.
+  History is kept in `logs/messages.jsonl`.
+- **Contacts:** search, filter by type, sort by last heard or name. Tap one
+  to message it, show it on the map, reset its route or remove it. Repeaters
+  and room servers also get remote admin: log in, status, CLI commands.
+- **Channels:** open a channel's chat, add, rename, rekey or remove one. The
+  bridge's own slot asks for confirmation first.
+- **Map:** every contact that shares a position, coloured by type.
+- **Settings:** name, position, TX power, LoRa settings, path hash size,
+  auto-add, adverts, clock, device stats and reboot (risky ones confirmed).
 - **Gateway:** open sessions, signups with Approve and Deny buttons (the same
   as `APPROVE` / `DENY` from a sysop radio), and the sysop radios.
+
+The map tiles and Leaflet come from the internet; everything else is local.
 
 It listens on 127.0.0.1 only and refuses other Host names, and every change
 needs a header a web page on another site cannot send. Set
