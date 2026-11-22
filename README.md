@@ -189,12 +189,53 @@ Then:
 
 ```
 py tools\test_login.py    # telnet check for every user, no radio needed
+py tools\preview.py       # see what the mesh gets, no radio needed
 py bpq_meshcore.py        # run the bridge
 ```
 
 Only one program can have the radio's COM port open. Close meshcore-cli or
 anything else using it first. If the radio or BPQ goes away, the bridge
 retries every 30 seconds.
+
+## Trimming what the mesh sees
+
+Every message costs airtime, and on a busy or multi-hop mesh each one can be
+lost and retried. Before going on the air, see what your station sends:
+
+```
+py tools\preview.py                # interactive, as the first user
+py tools\preview.py --guest        # what an unknown radio gets
+py tools\preview.py ? BBS L M BYE  # run these commands and exit
+```
+
+It runs the bridge's own reply code against your BPQ telnet port and prints
+each message with its size (the radio's limit is 140 bytes) and rough
+airtime, then a total per command. It never opens the radio, so the bridge
+can keep running. `--chunk N` and `--per-reply N` try other paging values
+without editing the config; `--wait 30` gives slow AI apps time to answer;
+`--sf/--bw/--cr` if your radio is not on the US preset (SF7, 62.5 kHz,
+CR 4/5).
+
+What to change, roughly in order of what it saves:
+
+1. **The node's `?` list.** BPQ lists every command it offers telnet users.
+   `command_sep` packs the list into as few messages as possible; hide
+   commands mesh users cannot use (RMS, NODES, ROUTES, ...) in BPQ, or
+   answer them with `telnet_only`.
+2. **Welcome and app banners.** `welcome` replaces the telnet CTEXT: keep it
+   to one line plus the help line. App banners and menus (OFFGRIDAI, WX, ...)
+   come from the app, not the bridge, so shorten them in the app.
+3. **BBS lists.** `compact_lists` and `bbs.bare_list` (`LL 10`) keep `L`
+   short; `paging.max_pages` caps what any one command can send.
+4. **Paging.** `chunk_chars` (default 118) is the text per message before
+   the `(1/3)` marker: raise it to fill messages, lower it if the preview
+   shows any over 140 bytes. `chunks_per_reply` is how many go out before
+   `M=More`; fewer loses less when the link is poor.
+5. **Leftovers.** `node_prefix`, `bbs_prompt`, `app_names` and `join_after`
+   take a few bytes off every reply.
+
+The preview reads the config fresh each run; restart the bridge for the
+mesh to get the change.
 
 ## Using it
 
@@ -279,6 +320,7 @@ needs a header a web page on another site cannot send. Set
 | `radio_web.py`, `radio_web.html` | the local management page |
 | `tools/setup_radio.py` | name, radio preset, private channel, join QR |
 | `tools/test_login.py` | telnet login check, no radio |
+| `tools/preview.py` | what the mesh gets per command (messages, bytes, airtime), no radio |
 | `meshcore_config.json` | your settings and passwords (gitignored) |
 | `mesh_members.json` | guest signups and approvals (gitignored) |
 | `channel-secrets/` | channel key and QR (gitignored) |
