@@ -221,6 +221,33 @@ One command never sends more than `paging.max_pages` pages (default 5, which
 is 20 messages). The rest is dropped and the last message reads
 `[List cut at 20 msgs. Try LL 10 or L 5590-5595]`. Set it to `0` for no cap.
 
+## Managing the radio from a browser
+
+The bridge holds the radio's COM port, so the official MeshCore app cannot
+connect while it runs. Instead the bridge serves its own page at
+**http://127.0.0.1:8091**, which works over the bridge's connection:
+
+- **Messages:** every DM and channel message in and out, including the
+  gateway's own replies (tick "Hide gateway traffic" to see only other
+  traffic). Send a channel message or a DM from the radio. Kept in
+  `logs/messages.jsonl`.
+- **Contacts:** name, type, last advert, route. Message, reset the route,
+  remove, or add a heard contact.
+- **Repeater and room-server admin:** log in, request status, run CLI
+  commands (`ver`, `neighbors`, `get name`, ...).
+- **Channels:** list, add, change or clear slots. The bridge's own slot
+  asks for confirmation first.
+- **Radio:** model, firmware, battery, uptime, noise floor, airtime and packet
+  counts. Change the name, position, TX power and auto-add. Send a zero-hop or
+  flood advert, set the clock, change the LoRa settings, or reboot (both
+  confirmed).
+- **Gateway:** open sessions, signups with Approve and Deny buttons (the same
+  as `APPROVE` / `DENY` from a sysop radio), and the sysop radios.
+
+It listens on 127.0.0.1 only and refuses other Host names, and every change
+needs a header a web page on another site cannot send. Set
+`"web": {"enabled": false}` to turn it off, or `"port"` to move it.
+
 ## Security and licensing
 
 - **The channel key is the access control.** MeshCore channel messages carry
@@ -245,11 +272,13 @@ is 20 messages). The rest is dropped and the last message reads
 | File | What |
 |---|---|
 | `bpq_meshcore.py` | the bridge |
+| `radio_web.py`, `radio_web.html` | the local management page |
 | `tools/setup_radio.py` | name, radio preset, private channel, join QR |
 | `tools/test_login.py` | telnet login check, no radio |
 | `meshcore_config.json` | your settings and passwords (gitignored) |
 | `mesh_members.json` | guest signups and approvals (gitignored) |
 | `channel-secrets/` | channel key and QR (gitignored) |
 | `logs/bpq_meshcore.log` | rotating log (gitignored) |
+| `logs/messages.jsonl` | message history for the page (gitignored) |
 
 MIT licensed. Written for the N4SFL-8 node by N8FLA.

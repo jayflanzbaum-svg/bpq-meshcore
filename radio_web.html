@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mesh Radio</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #fff; --text: #1b1f24; --muted: #667085; --line: #e3e6ea;
+  --accent: #2f6fde; --accent-text: #fff; --in: #eef3fc; --out: #e9f6ee; --warn: #b54708;
+  --bad: #c0362c; --good: #1f7a3f; --chip: #eef0f3;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171b; --panel: #1c2026; --text: #e6e8eb; --muted: #98a1ad; --line: #2c323a;
+    --accent: #5b8ff0; --accent-text: #0b0d10; --in: #1d2635; --out: #1c2b22; --warn: #f0a54a;
+    --bad: #f07167; --good: #5cc98a; --chip: #262b33;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 17px; margin: 0; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+.meta { color: var(--muted); font-size: 13px; }
+nav { display: flex; gap: 2px; padding: 0 20px; background: var(--panel);
+  border-bottom: 1px solid var(--line); overflow-x: auto; }
+nav button { border: 0; background: none; color: var(--muted); padding: 10px 14px;
+  font: inherit; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+nav button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+main { padding: 16px 20px; max-width: 1200px; }
+section { display: none; } section.on { display: block; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 14px 16px; margin-bottom: 14px; }
+.card h2 { font-size: 14px; margin: 0 0 10px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+input, select, textarea { font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+button.b { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+button.b.pri { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+button.b.bad { color: var(--bad); }
+button.b:disabled { opacity: .5; cursor: default; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; }
+td.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+.chip { background: var(--chip); border-radius: 10px; padding: 1px 8px; font-size: 12px; }
+#feed { height: 55vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px; }
+.msg { max-width: 80%; padding: 6px 10px; border-radius: 8px; background: var(--in); }
+.msg.out { align-self: flex-end; background: var(--out); }
+.msg .h { font-size: 12px; color: var(--muted); }
+.msg .t { white-space: pre-wrap; word-break: break-word; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px 18px; }
+.kv { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px dashed var(--line); padding: 3px 0; }
+.kv span:first-child { color: var(--muted); }
+label.f { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+#toast { position: fixed; bottom: 16px; right: 16px; background: var(--text); color: var(--bg);
+  padding: 8px 14px; border-radius: 6px; opacity: 0; transition: opacity .2s; max-width: 420px; }
+#toast.on { opacity: 1; }
+.warn { color: var(--warn); } .good { color: var(--good); } .bad { color: var(--bad); }
+pre.out { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px;
+  white-space: pre-wrap; max-height: 300px; overflow: auto; margin: 8px 0 0; }
+@media (max-width: 640px) { main, header, nav { padding-left: 12px; padding-right: 12px; } .msg { max-width: 95%; } }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Mesh Radio</h1>
+  <span id="conn" class="meta"><span class="dot" style="background:var(--muted)"></span>connecting…</span>
+  <span id="hdr" class="meta"></span>
+</header>
+<nav id="tabs">
+  <button data-t="messages" class="on">Messages</button>
+  <button data-t="contacts">Contacts</button>
+  <button data-t="channels">Channels</button>
+  <button data-t="radio">Radio</button>
+  <button data-t="gateway">Gateway</button>
+</nav>
+<main>
+
+<section id="messages" class="on">
+  <div class="card">
+    <div class="row" style="margin-bottom:8px">
+      <label class="f">Show
+        <select id="filter"><option value="">Everything</option></select></label>
+      <label class="f" style="flex-direction:row;align-items:center;gap:6px;margin-top:14px">
+        <input type="checkbox" id="hideBridge"> Hide gateway traffic</label>
+    </div>
+    <div id="feed"></div>
+  </div>
+  <div class="card">
+    <h2>Send</h2>
+    <div class="row">
+      <select id="sendTo"></select>
+      <input id="sendText" maxlength="140" placeholder="Message (140 max)" style="flex:1;min-width:200px">
+      <span id="sendLen" class="meta">0/140</span>
+      <button class="b pri" id="sendBtn">Send</button>
+    </div>
+  </div>
+</section>
+
+<section id="contacts">
+  <div class="card">
+    <div class="row" style="justify-content:space-between;margin-bottom:8px">
+      <h2 style="margin:0">Contacts <span id="ccount" class="meta"></span></h2>
+      <div class="row">
+        <input id="csearch" placeholder="Filter by name or key">
+        <button class="b" id="crefresh">Refresh</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto"><table id="ctable"><thead><tr>
+      <th>Name</th><th>Type</th><th>Key</th><th>Last advert</th><th>Route</th><th></th>
+    </tr></thead><tbody></tbody></table></div>
+    <div id="pending" class="meta" style="margin-top:8px"></div>
+  </div>
+  <div class="card" id="admin" hidden>
+    <h2>Admin: <span id="aname"></span> <span id="akey" class="mono meta"></span></h2>
+    <div class="row">
+      <input id="apwd" type="password" placeholder="Admin or guest password" autocomplete="off">
+      <button class="b" id="alogin">Log in</button>
+      <button class="b" id="astatus">Status</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="acmd" placeholder="CLI command, e.g. get name, ver, neighbors, clock" style="flex:1;min-width:220px">
+      <button class="b pri" id="acmdBtn">Run</button>
+    </div>
+    <pre class="out" id="aout" hidden></pre>
+  </div>
+</section>
+
+<section id="channels">
+  <div class="card">
+    <h2>Channels</h2>
+    <table id="chtable"><thead><tr><th>#</th><th>Name</th><th>Hash</th><th></th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card">
+    <h2>Add or change a channel</h2>
+    <div class="row">
+      <label class="f">Slot <input id="chIdx" type="number" min="0" max="39" style="width:70px"></label>
+      <label class="f">Name <input id="chName" placeholder="#public-hashtag or Private name"></label>
+      <label class="f">Secret (32 hex; blank for a #hashtag channel)
+        <input id="chSecret" class="mono" style="width:300px" autocomplete="off"></label>
+      <button class="b pri" id="chSave" style="margin-top:14px">Save</button>
+    </div>
+    <p class="meta">A name starting with # makes a public hashtag channel whose key comes from the name. Saving an empty name clears the slot.</p>
+  </div>
+</section>
+
+<section id="radio">
+  <div class="card">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">This radio</h2>
+      <button class="b" id="statsBtn">Refresh stats</button></div>
+    <div class="grid" id="info" style="margin-top:10px"></div>
+  </div>
+  <div class="card">
+    <h2>Identity and position</h2>
+    <div class="row">
+      <label class="f">Name <input id="sName" style="width:220px"></label>
+      <label class="f">Latitude <input id="sLat" style="width:120px"></label>
+      <label class="f">Longitude <input id="sLon" style="width:120px"></label>
+      <label class="f">TX power (dBm) <input id="sTx" type="number" style="width:90px"></label>
+      <button class="b pri" id="sSave" style="margin-top:14px">Save</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label class="f" style="flex-direction:row;align-items:center;gap:6px">
+        <input type="checkbox" id="sAuto"> Auto-add contacts from adverts (the gateway's guest tier needs this on)</label>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Adverts and clock</h2>
+    <div class="row">
+      <button class="b" id="advZero">Send zero-hop advert</button>
+      <button class="b" id="advFlood">Send flood advert</button>
+      <button class="b" id="syncTime">Set radio clock from this PC</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>LoRa settings <span class="warn" style="font-weight:400">changing these takes the radio off the local mesh unless everyone else matches</span></h2>
+    <div class="row">
+      <label class="f">Frequency (MHz) <input id="rFreq" style="width:110px"></label>
+      <label class="f">Bandwidth (kHz) <input id="rBw" style="width:90px"></label>
+      <label class="f">SF <input id="rSf" type="number" style="width:70px"></label>
+      <label class="f">CR <input id="rCr" type="number" style="width:70px"></label>
+      <button class="b bad" id="rSave" style="margin-top:14px">Apply…</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Reboot</h2>
+    <p class="meta">Mesh users are cut off for about 40 seconds while the radio restarts and the bridge reconnects.</p>
+    <button class="b bad" id="reboot">Reboot radio…</button>
+  </div>
+</section>
+
+<section id="gateway">
+  <div class="card">
+    <h2>Sessions</h2>
+    <table id="stable"><thead><tr><th>User</th><th>Reply via</th><th>Node session</th><th>Idle</th><th>Pages waiting</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card">
+    <h2>Signups</h2>
+    <table id="mtable"><thead><tr><th>Callsign</th><th>Name</th><th>Class</th><th>Radio</th><th>Requested</th><th>Status</th><th></th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card">
+    <h2>Sysop radios</h2>
+    <div id="sysops" class="meta"></div>
+  </div>
+</section>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let S = {}, contacts = [], channels = [], lastId = 0, msgs = [], adminKey = null;
+
+function toast(t, bad) {
+  const el = $("#toast"); el.textContent = t; el.style.background = bad ? "var(--bad)" : "";
+  el.classList.add("on"); clearTimeout(toast.h); toast.h = setTimeout(() => el.classList.remove("on"), 4000);
+}
+async function api(path, body) {
+  const opt = body === undefined ? {} :
+    {method: "POST", headers: {"Content-Type": "application/json", "X-Radio": "1"}, body: JSON.stringify(body)};
+  const r = await fetch("/api/" + path, opt);
+  const j = await r.json().catch(() => ({error: "bad reply (" + r.status + ")"}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+async function act(btn, fn, okMsg) {
+  if (btn) btn.disabled = true;
+  try { const r = await fn(); if (okMsg) toast(typeof okMsg === "function" ? okMsg(r) : okMsg); return r; }
+  catch (e) { toast(e.message, true); }
+  finally { if (btn) btn.disabled = false; }
+}
+const ago = t => { if (!t) return "never"; const s = Date.now()/1000 - t;
+  if (s < -120) return "their clock is fast"; if (s < 90) return "just now"; 
+  if (s < 5400) return Math.round(s/60) + "m ago"; if (s < 172800) return Math.round(s/3600) + "h ago";
+  return Math.round(s/86400) + "d ago"; };
+const hhmm = t => new Date(t*1000).toLocaleString([], {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit"});
+const route = h => h == null || h < 0 ? "flood" : h == 0 ? "direct" : h + " hop" + (h > 1 ? "s" : "");
+const nameOf = k => (contacts.find(c => c.key.startsWith(k)) || {}).name || "";
+
+// ---- tabs
+document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#tabs button, main section").forEach(x => x.classList.remove("on"));
+  b.classList.add("on"); $("#" + b.dataset.t).classList.add("on");
+  try { localStorage.setItem("tab", b.dataset.t); } catch (e) {}
+  if (b.dataset.t === "contacts") loadContacts();
+  if (b.dataset.t === "channels") loadChannels();
+  if (b.dataset.t === "radio") loadStats();
+});
+try { const t = localStorage.getItem("tab"); if (t) document.querySelector(`#tabs button[data-t=${t}]`)?.click(); } catch (e) {}
+
+// ---- state
+async function loadState() {
+  try { S = await api("state"); } catch (e) { S = {connected: false, err: e.message}; }
+  const c = $("#conn");
+  c.innerHTML = S.connected
+    ? `<span class="dot" style="background:var(--good)"></span>connected on ${esc(S.port)}`
+    : `<span class="dot" style="background:var(--bad)"></span>${esc(S.err || "radio not connected")}`;
+  const me = S.self || {};
+  if (me.name) { $("#title").textContent = me.name; document.title = me.name + " · Mesh Radio"; }
+  $("#hdr").textContent = me.radio_freq ? `${me.radio_freq} MHz · BW ${me.radio_bw} · SF${me.radio_sf} · ${me.tx_power} dBm` : "";
+  renderGateway(); renderInfo();
+}
+
+// ---- messages
+async function loadMessages() {
+  try {
+    const r = await api("messages?since=" + lastId);
+    if (!r.messages.length) return;
+    msgs.push(...r.messages); lastId = msgs[msgs.length-1].id;
+    if (msgs.length > 2000) msgs = msgs.slice(-2000);
+    renderFeed(); renderSendTo(); renderFilter();
+  } catch (e) {}
+}
+function convKey(m) { return m.kind === "chan" ? "ch:" + m.ch : "dm:" + (m.peer || "").slice(0,12); }
+function convLabel(k) {
+  if (k.startsWith("ch:")) { const i = +k.slice(3); const ch = channels.find(c => c.idx === i);
+    return "Channel " + i + (ch ? " " + ch.name : "") + (i === S.bridge_channel ? " (gateway)" : ""); }
+  const kp = k.slice(3); return "DM " + (nameOf(kp) || msgs.find(m => convKey(m) === k && m.name)?.name || kp);
+}
+function renderFilter() {
+  const sel = $("#filter"), cur = sel.value, keys = [...new Set(msgs.map(convKey))];
+  sel.innerHTML = '<option value="">Everything</option>' + keys.map(k => `<option value="${esc(k)}">${esc(convLabel(k))}</option>`).join("");
+  sel.value = keys.includes(cur) ? cur : "";
+}
+function renderFeed() {
+  const f = $("#filter").value, hide = $("#hideBridge").checked, feed = $("#feed");
+  const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40;
+  const rows = msgs.filter(m => (!f || convKey(m) === f) && !(hide && isGateway(m)));
+  feed.innerHTML = rows.slice(-500).map(m => {
+    const who = m.dir === "out"
+      ? (m.kind === "chan" ? `→ channel ${m.ch}` : `→ ${esc(m.name || m.peer)}`) + (m.via === "bridge" ? " · gateway" : "")
+      : (m.kind === "chan" ? `${esc(m.name || "?")} · channel ${m.ch}` : esc(m.name || nameOf(m.peer) || m.peer));
+    const extra = [m.snr != null ? "SNR " + m.snr : "", m.hops != null && m.hops !== 255 ? route(m.hops) : "",
+      m.acked === false ? '<span class="bad">not acked</span>' : m.acked ? '<span class="good">✓</span>' : ""].filter(Boolean).join(" · ");
+    return `<div class="msg ${m.dir}"><div class="h">${who} · ${hhmm(m.t)}${extra ? " · " + extra : ""}</div><div class="t">${esc(m.text)}</div></div>`;
+  }).join("") || '<p class="meta">No messages yet.</p>';
+  if (atBottom || !renderFeed.done) feed.scrollTop = feed.scrollHeight;
+  renderFeed.done = true;
+}
+// Gateway traffic: what the bridge sends, every DM it receives (all DMs to
+// this radio go to the gateway) and anything on its private channel.
+const isGateway = m => m.via === "bridge" || (m.dir === "in" && m.kind === "dm") || (m.kind === "chan" && m.ch === S.bridge_channel && m.via !== "web");
+$("#filter").onchange = renderFeed; $("#hideBridge").onchange = renderFeed;
+function renderSendTo() {
+  const sel = $("#sendTo"), cur = sel.value;
+  const chans = channels.length ? channels : [{idx: 0, name: "Public"}];
+  const people = contacts.filter(c => c.type_id === 1 || c.type_id === 3);
+  sel.innerHTML = chans.map(c => `<option value="ch:${c.idx}">Channel ${c.idx} ${esc(c.name)}</option>`).join("") +
+    people.map(c => `<option value="dm:${c.key}">DM ${esc(c.name)}</option>`).join("");
+  if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+  else { const f = $("#filter").value; if (f.startsWith("ch:")) sel.value = f; }
+}
+$("#sendText").oninput = e => $("#sendLen").textContent = new TextEncoder().encode(e.target.value).length + "/140";
+$("#sendText").onkeydown = e => { if (e.key === "Enter") $("#sendBtn").click(); };
+$("#sendBtn").onclick = () => {
+  const to = $("#sendTo").value, text = $("#sendText").value.trim(); if (!text) return;
+  const body = to.startsWith("ch:") ? {channel: +to.slice(3), text} : {to: to.slice(3), text};
+  if (body.channel === S.bridge_channel && !confirm("This is the gateway's private channel. Every user on it will see this. Send?")) return;
+  act($("#sendBtn"), () => api("send", body), r => r.acked === false ? "Sent, but not acknowledged" : "Sent")
+    .then(r => { if (r) { $("#sendText").value = ""; $("#sendLen").textContent = "0/140"; loadMessages(); } });
+};
+
+// ---- contacts
+async function loadContacts() {
+  try { const r = await api("contacts"); contacts = r.contacts;
+    $("#pending").innerHTML = r.pending.length ? "Heard but not added: " + r.pending.map(k =>
+      `<span class="mono">${esc(k.slice(0,12))}</span> <button class="b" data-add="${esc(k)}">Add</button>`).join(" ") : "";
+    renderContacts(); renderSendTo(); renderFeed(); renderGateway();
+  } catch (e) { toast(e.message, true); }
+}
+function renderContacts() {
+  const q = $("#csearch").value.toLowerCase();
+  const rows = contacts.filter(c => !q || c.name.toLowerCase().includes(q) || c.key.includes(q));
+  $("#ccount").textContent = `(${rows.length} of ${contacts.length})`;
+  $("#ctable tbody").innerHTML = rows.map(c => `<tr>
+    <td>${esc(c.name)}</td><td><span class="chip">${esc(c.type)}</span></td>
+    <td class="mono">${esc(c.key.slice(0,12))}</td><td>${ago(c.last_advert)}</td>
+    <td title="${esc(c.path)}">${route(c.hops)}</td>
+    <td class="row" style="justify-content:flex-end">
+      ${c.type_id === 1 || c.type_id === 3 ? `<button class="b" data-dm="${c.key}">Message</button>` : ""}
+      ${c.type_id === 2 || c.type_id === 3 ? `<button class="b" data-admin="${c.key}">Admin</button>` : ""}
+      ${c.hops >= 0 ? `<button class="b" data-reset="${c.key}">Reset route</button>` : ""}
+      <button class="b bad" data-rm="${c.key}">Remove</button></td></tr>`).join("");
+}
+$("#csearch").oninput = renderContacts; $("#crefresh").onclick = loadContacts;
+document.addEventListener("click", e => {
+  const d = e.target.dataset; if (!d) return;
+  if (d.dm) { document.querySelector("#tabs button[data-t=messages]").click(); renderSendTo();
+    $("#sendTo").value = "dm:" + d.dm; $("#filter").value = "dm:" + d.dm.slice(0,12); renderFeed(); $("#sendText").focus(); }
+  if (d.reset) act(e.target, () => api("contact/reset-path", {key: d.reset}), "Route reset; next message floods").then(loadContacts);
+  if (d.rm && confirm("Remove " + (nameOf(d.rm) || d.rm.slice(0,12)) + " from this radio's contacts?"))
+    act(e.target, () => api("contact/remove", {key: d.rm}), "Removed").then(loadContacts);
+  if (d.add) act(e.target, () => api("contact/add-pending", {key: d.add}), "Added").then(loadContacts);
+  if (d.admin) { adminKey = d.admin; $("#admin").hidden = false; $("#aname").textContent = nameOf(d.admin);
+    $("#akey").textContent = d.admin.slice(0,12); $("#aout").hidden = true; $("#apwd").focus(); }
+  if (d.approve || d.deny) { const cmd = d.approve ? "APPROVE" : "DENY", call = d.approve || d.deny;
+    if (confirm(`${cmd === "APPROVE" ? "Approve" : "Deny"} ${call}? Their radio gets a DM saying so.`))
+      act(e.target, () => api("member", {action: cmd, callsign: call}), call + (cmd === "APPROVE" ? " approved" : " denied")).then(loadState); }
+  if (d.ch !== undefined && e.target.tagName === "BUTTON") { const c = channels.find(x => x.idx === +d.ch);
+    $("#chIdx").value = d.ch; $("#chName").value = c ? c.name : ""; $("#chSecret").value = ""; $("#chName").focus(); }
+});
+function aout(t) { const o = $("#aout"); o.hidden = false; o.textContent = t; }
+$("#alogin").onclick = () => act($("#alogin"), () => api("repeater/login", {key: adminKey, password: $("#apwd").value}), "Logged in")
+  .then(r => r && aout("Logged in.\n" + JSON.stringify(r.payload, null, 1)));
+$("#astatus").onclick = () => act($("#astatus"), () => api("repeater/status", {key: adminKey}))
+  .then(r => r && aout(fmtStatus(r.status)));
+$("#acmdBtn").onclick = () => act($("#acmdBtn"), () => api("repeater/cmd", {key: adminKey, cmd: $("#acmd").value}))
+  .then(r => r && aout("> " + $("#acmd").value + "\n" + r.reply));
+$("#acmd").onkeydown = e => { if (e.key === "Enter") $("#acmdBtn").click(); };
+function fmtStatus(s) {
+  if (!s) return "No status.";
+  const L = [];
+  if (s.bat != null) L.push(`Battery ${(s.bat/1000).toFixed(2)} V`);
+  if (s.uptime != null) L.push(`Up ${(s.uptime/3600).toFixed(1)} h`);
+  if (s.noise_floor != null) L.push(`Noise floor ${s.noise_floor} dBm`);
+  if (s.last_rssi != null) L.push(`Last RSSI ${s.last_rssi}, SNR ${s.last_snr}`);
+  if (s.nb_recv != null) L.push(`Packets in ${s.nb_recv}, out ${s.nb_sent}`);
+  if (s.airtime != null) L.push(`TX airtime ${s.airtime} s, RX ${s.rx_airtime ?? "?"} s`);
+  return L.join("\n") + "\n\n" + JSON.stringify(s, null, 1);
+}
+
+// ---- channels
+async function loadChannels() {
+  try { const r = await api("channels"); channels = r.channels;
+    $("#chtable tbody").innerHTML = channels.map(c => `<tr><td>${c.idx}</td><td>${esc(c.name)}${c.idx === r.bridge_channel ? ' <span class="chip">gateway</span>' : ""}</td>
+      <td class="mono">${esc(c.hash)}</td><td><button class="b" data-ch="${c.idx}">Edit</button></td></tr>`).join("");
+    const used = new Set(channels.map(c => c.idx)); let free = 0; while (used.has(free)) free++;
+    if ($("#chIdx").value === "") $("#chIdx").value = free;
+    renderSendTo(); renderFilter(); renderFeed();
+  } catch (e) { toast(e.message, true); }
+}
+$("#chSave").onclick = () => {
+  const idx = +$("#chIdx").value, body = {idx, name: $("#chName").value, secret: $("#chSecret").value.trim()};
+  if (idx === S.bridge_channel) {
+    if (!confirm(`Slot ${idx} is the gateway's private channel. Changing it cuts off every user on it. Continue?`)) return;
+    body.confirm = "BRIDGE CHANNEL";
+  }
+  act($("#chSave"), () => api("channel", body), "Channel saved").then(r => { if (r) { $("#chSecret").value = ""; loadChannels(); } });
+};
+
+// ---- radio
+let stats = {};
+async function loadStats() { try { stats = await api("stats"); } catch (e) { toast(e.message, true); } renderInfo(true); }
+function renderInfo(fillForm) {
+  const me = S.self || {}, d = S.device || {}, b = stats.battery || {}, core = stats.core || {}, rad = stats.radio || {}, pk = stats.packets || {};
+  const kv = [["Name", me.name], ["Public key", me.public_key ? `<span class="mono">${esc(me.public_key.slice(0,16))}…</span>` : ""],
+    ["Model", d.model], ["Firmware", [d.ver, d.fw_build].filter(Boolean).join(" ")],
+    ["Frequency", me.radio_freq && me.radio_freq + " MHz"], ["Bandwidth", me.radio_bw && me.radio_bw + " kHz"],
+    ["Spreading / coding", me.radio_sf && `SF${me.radio_sf} / CR${me.radio_cr}`],
+    ["TX power", me.tx_power != null && `${me.tx_power} dBm (max ${me.max_tx_power})`],
+    ["Position", me.adv_lat ? `${me.adv_lat.toFixed(5)}, ${me.adv_lon.toFixed(5)}` : "not set"],
+    ["Auto-add contacts", me.manual_add_contacts === undefined ? "" : me.manual_add_contacts ? "off" : "on"],
+    ["Max contacts / channels", d.max_contacts && `${d.max_contacts} / ${d.max_channels}`],
+    ["Battery", b.level != null ? (b.level > 100 ? (b.level/1000).toFixed(2) + " V" : b.level + "%") : ""],
+    ["Storage", b.used_kb != null && `${b.used_kb} of ${b.total_kb} KB`],
+    ["Uptime", core.uptime_secs != null && (core.uptime_secs/3600).toFixed(1) + " h"],
+    ["Battery (core)", core.battery_mv && (core.battery_mv/1000).toFixed(2) + " V"],
+    ["TX queue / errors", core.queue_len != null && `${core.queue_len} / ${core.errors}`],
+    ["Noise floor", rad.noise_floor != null && rad.noise_floor + " dBm"],
+    ["Last RSSI / SNR", rad.last_rssi != null && `${rad.last_rssi} / ${rad.last_snr}`],
+    ["Airtime TX / RX", rad.tx_air_secs != null && `${rad.tx_air_secs} s / ${rad.rx_air_secs} s`],
+    ["Packets in / out", pk.recv != null && `${pk.recv} / ${pk.sent}`],
+    ["Flood / direct out", pk.flood_tx != null && `${pk.flood_tx} / ${pk.direct_tx}`]];
+  $("#info").innerHTML = kv.filter(x => x[1]).map(([k, v]) => `<div class="kv"><span>${k}</span><span>${typeof v === "string" && v.startsWith("<") ? v : esc(v)}</span></div>`).join("");
+  if (fillForm || !renderInfo.filled) if (me.name) {
+    renderInfo.filled = true;
+    $("#sName").value = me.name; $("#sLat").value = me.adv_lat || ""; $("#sLon").value = me.adv_lon || "";
+    $("#sTx").value = me.tx_power; $("#sTx").max = me.max_tx_power; $("#sAuto").checked = !me.manual_add_contacts;
+    $("#rFreq").value = me.radio_freq; $("#rBw").value = me.radio_bw; $("#rSf").value = me.radio_sf; $("#rCr").value = me.radio_cr;
+  }
+}
+$("#statsBtn").onclick = () => loadStats();
+$("#sSave").onclick = () => {
+  const me = S.self || {}, body = {};
+  if ($("#sName").value !== me.name) body.name = $("#sName").value;
+  if ($("#sLat").value != (me.adv_lat || "") || $("#sLon").value != (me.adv_lon || "")) { body.lat = $("#sLat").value; body.lon = $("#sLon").value; }
+  if (+$("#sTx").value !== me.tx_power) body.tx_power = +$("#sTx").value;
+  if ($("#sAuto").checked === !!me.manual_add_contacts) body.manual_add = !$("#sAuto").checked;
+  if (!Object.keys(body).length) return toast("Nothing changed");
+  act($("#sSave"), () => api("settings", body), r => "Saved: " + r.changed.join(", ")).then(() => loadState().then(() => renderInfo(true)));
+};
+$("#sAuto").onchange = () => $("#sSave").click();
+$("#advZero").onclick = e => act(e.target, () => api("advert", {flood: false}), "Zero-hop advert sent");
+$("#advFlood").onclick = e => act(e.target, () => api("advert", {flood: true}), "Flood advert sent");
+$("#syncTime").onclick = e => act(e.target, () => api("sync-time", {}), "Radio clock set");
+$("#rSave").onclick = () => {
+  const radio = {freq: $("#rFreq").value, bw: $("#rBw").value, sf: $("#rSf").value, cr: $("#rCr").value};
+  if (prompt("Changing LoRa settings moves this radio off the mesh unless every other node matches.\nType CHANGE RADIO to apply.") !== "CHANGE RADIO") return;
+  act($("#rSave"), () => api("settings", {radio, confirm: "CHANGE RADIO"}), "Radio settings applied").then(loadState);
+};
+$("#reboot").onclick = () => {
+  if (prompt("Reboot the radio? Mesh users are cut off for about 40 s.\nType REBOOT to continue.") !== "REBOOT") return;
+  act($("#reboot"), () => api("reboot", {confirm: "REBOOT"}), "Rebooting; the bridge reconnects on its own");
+};
+
+// ---- gateway
+function renderGateway() {
+  const ss = S.sessions || [];
+  $("#stable tbody").innerHTML = ss.map(s => `<tr><td>${esc(s.name.startsWith("dm:") ? "Guest " + s.name.slice(3) : s.name)}</td>
+    <td class="mono">${esc(s.dest === "channel" ? "channel" : (nameOf(s.dest) || s.dest))}</td>
+    <td>${s.open ? '<span class="good">open</span>' : "closed"}</td><td>${s.idle_s != null ? Math.round(s.idle_s/60) + " min" : ""}</td>
+    <td>${s.pages_waiting || ""}</td></tr>`).join("") || '<tr><td colspan="5" class="meta">Nobody since the bridge started.</td></tr>';
+  const ms = Object.entries(S.members || {}).sort((a, b) => (a[1].status === "pending" ? -1 : 0) - (b[1].status === "pending" ? -1 : 0));
+  $("#mtable tbody").innerHTML = ms.map(([kp, m]) => `<tr><td><b>${esc(m.callsign)}</b></td><td>${esc(m.name)}</td><td>${esc(m.oper_class)}</td>
+    <td class="mono" title="${esc(nameOf(kp))}">${esc(kp)}</td><td>${esc((m.requested || "").replace("T", " "))}</td>
+    <td>${m.status === "pending" ? '<span class="warn">pending</span>' : m.status === "approved" ? '<span class="good">approved</span>' : esc(m.status)}${m.verified === false ? ' <span class="bad">(not FCC-verified)</span>' : ""}</td>
+    <td class="row">${m.status !== "approved" ? `<button class="b pri" data-approve="${esc(m.callsign)}">Approve</button>` : ""}
+      ${m.status !== "denied" ? `<button class="b bad" data-deny="${esc(m.callsign)}">Deny</button>` : ""}</td></tr>`).join("")
+    || '<tr><td colspan="7" class="meta">No signups yet.</td></tr>';
+  $("#sysops").innerHTML = Object.entries(S.sysops || {}).map(([n, k]) => `${esc(n)} <span class="mono">${esc(k)}</span>`).join(" · ");
+}
+
+// ---- loop
+(async () => {
+  await loadState(); await Promise.all([loadContacts(), loadChannels()]); await loadMessages();
+  setInterval(loadMessages, 2000); setInterval(loadState, 10000);
+})();
+</script>
+</body>
+</html>

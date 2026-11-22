@@ -47,6 +47,8 @@ from typing import Dict, List, Optional
 
 from meshcore import EventType, MeshCore
 
+from radio_web import RadioWeb
+
 HERE = Path(__file__).resolve().parent
 # Optional first argument: another config file (bench tests).
 CONFIG_FILE = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "meshcore_config.json"
@@ -69,6 +71,9 @@ DEFAULT_CONFIG = {
     "paging": {"chunk_chars": 118, "chunks_per_reply": 4, "gap_s": 2.5,
                "max_pages": 5},
     "adverts": {"flood_every_h": 12},
+    # Local web page for managing the radio (the bridge holds the USB port,
+    # so the official app cannot): http://127.0.0.1:<port>, this PC only.
+    "web": {"enabled": True, "port": 8091},
     # Guests: any radio that DMs the bridge without being in "users". They
     # never reach BPQ or RF: the bridge connects them straight to the
     # internet-only apps on their BPQ CMDPORTs, as that radio's own user
@@ -157,7 +162,7 @@ def load_config() -> Dict:
                   CONFIG_FILE.name, e.lineno, e.colno, e.msg, line)
         sys.exit(1)
     for k in ("radio", "channel", "bbs", "paging", "adverts", "display",
-              "telnet_only", "guests"):
+              "telnet_only", "guests", "web"):
         cfg[k] = {**DEFAULT_CONFIG[k], **cfg.get(k, {})}
     cfg.setdefault("users", {})
     return cfg
@@ -573,8 +578,9 @@ def key_prefix(k: str) -> str:
 
 
 class Bridge:
-    def __init__(self, cfg: Dict):
+    def __init__(self, cfg: Dict, web: Optional[RadioWeb] = None):
         self.cfg = cfg
+        self.web = web
         self.mc: Optional[MeshCore] = None
         self.users: Dict[str, UserState] = {}
         self.radio_lock = asyncio.Lock()   # one radio: sends go out in order
@@ -597,10 +603,18 @@ class Bridge:
                 r = await self.mc.commands.send_chan_msg(self.chan, text)
                 if r.type == EventType.ERROR:
                     log.error("send_chan_msg failed: %s", r.payload)
+                if self.web:
+                    self.web.record("out", "chan", text, channel=self.chan,
+                                    name="(bridge)", via="bridge")
             else:
                 r = await self.mc.commands.send_msg_with_retry(dest, text)
-                if r is None or r.type == EventType.ERROR:
+                acked = not (r is None or r.type == EventType.ERROR)
+                if not acked:
                     log.error("DM to %s not acknowledged: %r", dest, text[:40])
+                if self.web:
+                    self.web.record("out", "dm", text, peer=dest,
+                                    name=self.web.contact_name(dest), via="bridge",
+                                    acked=acked)
             await asyncio.sleep(self.cfg["paging"]["gap_s"])
 
     async def page_out(self, st: UserState) -> None:
@@ -680,6 +694,10 @@ class Bridge:
 
     async def on_dm(self, ev) -> None:
         p = ev.payload or {}
+        # Only plain text. CLI replies from a repeater and room-server posts
+        # (txt_type 1 and 2) are not someone talking to the bridge.
+        if p.get("txt_type", 0) != 0:
+            return
         kp = key_prefix(p.get("pubkey_prefix", ""))
         body = str(p.get("text", ""))
         name = self.by_key.get(kp)
@@ -898,24 +916,35 @@ class Bridge:
             await self.reply("Pending: " + (", ".join(p) if p else "none"), dest)
             return True
         call = words[1].upper() if len(words) > 1 else ""
-        hits = [(kp, m) for kp, m in self.members.items() if m.get("callsign") == call]
-        if not hits:
+        if not self.decide(cmd, call, name):
             await self.reply(f"No signup for {call or '?'}. Send PENDING for the list.", dest)
             return True
-        for kp, m in hits:
+        await self.reply(f"{call} {'approved' if cmd == 'APPROVE' else 'denied'}.", dest)
+        await self.tell_decision(cmd, call)
+        return True
+
+    def decide(self, cmd: str, call: str, by: str) -> bool:
+        """Mark every signup for `call` approved or denied. False if none."""
+        hits = [m for m in self.members.values() if m.get("callsign") == call]
+        for m in hits:
             m["status"] = "approved" if cmd == "APPROVE" else "denied"
             m["decided"] = datetime.now().isoformat(timespec="seconds")
-            m["decided_by"] = name
-        save_members(self.members)
-        log.info("[%s] %s %s", name, cmd.lower(), call)
-        await self.reply(f"{call} {'approved' if cmd == 'APPROVE' else 'denied'}.", dest)
-        for kp, _ in hits:
+            m["decided_by"] = by
+        if hits:
+            save_members(self.members)
+            log.info("[%s] %s %s", by, cmd.lower(), call)
+        return bool(hits)
+
+    async def tell_decision(self, cmd: str, call: str) -> None:
+        """DM the radio(s) behind `call` the sysop's answer."""
+        for kp, m in list(self.members.items()):
+            if m.get("callsign") != call:
+                continue
             if cmd == "APPROVE":
                 await self.reply(f"Welcome {call}! You are approved. Send ? for your menu.", kp)
             else:
                 await self.reply("Sorry, your request was not approved. Guest access "
                                "still works: send ?", kp)
-        return True
 
     # -- housekeeping
     async def idle_reaper(self) -> None:
@@ -949,8 +978,29 @@ class Bridge:
         self.mc = await MeshCore.create_serial(r["port"], r["baud"])
         if self.mc is None:
             raise ConnectionError(f"no MeshCore companion on {r['port']}")
+        try:
+            await self._serve(r)
+        finally:
+            # Always let go of the port, or every retry gets "Access is denied".
+            for st in self.users.values():
+                if st.session:
+                    await st.session.close()
+            try:
+                await self.mc.disconnect()
+            except Exception:
+                log.exception("error disconnecting radio")
+
+    async def _serve(self, r: Dict) -> None:
         self.mc.subscribe(EventType.CHANNEL_MSG_RECV, self.on_channel)
         self.mc.subscribe(EventType.CONTACT_MSG_RECV, self.on_dm)
+        if self.web:
+            self.web.attach(self)
+            try:
+                dq = await self.mc.commands.send_device_query()
+                if dq.type != EventType.ERROR:
+                    self.web.device = dq.payload
+            except Exception:
+                log.exception("device query for the web page failed")
         await self.mc.start_auto_message_fetching()
         if self.cfg["guests"].get("enabled"):
             # The radio can only answer a DM from a contact. With manual add
@@ -978,13 +1028,6 @@ class Bridge:
         finally:
             for t in tasks:
                 t.cancel()
-            for st in self.users.values():
-                if st.session:
-                    await st.session.close()
-            try:
-                await self.mc.disconnect()
-            except Exception:
-                log.exception("error disconnecting radio")
 
 
 async def main() -> None:
@@ -993,9 +1036,17 @@ async def main() -> None:
         if "CHANGE_ME" in (u.get("telnet_user"), u.get("telnet_password")):
             log.error("users[%s] still has CHANGE_ME credentials", name)
             sys.exit(1)
+    web = None
+    if cfg["web"].get("enabled"):
+        web = RadioWeb(int(cfg["web"]["port"]))
+        try:
+            await web.start()
+        except OSError as e:
+            log.error("radio web page not started (port %s): %s", cfg["web"]["port"], e)
+            web = None
     while True:
         try:
-            await Bridge(cfg).run()
+            await Bridge(cfg, web).run()
         except Exception:
             log.exception("bridge stopped")
         log.info("restarting in 30 s")
