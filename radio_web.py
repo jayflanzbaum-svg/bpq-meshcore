@@ -568,6 +568,41 @@ class RadioWeb:
         _ok(await self._cmd(lambda mc: mc.commands.add_contact(c)))
         return {"done": True}
 
+    async def post_contacts_import(self, a) -> Dict:
+        """Put contacts back on the radio from a saved list (rows as GET
+        /api/contacts returns them), e.g. after a reboot came back with fewer.
+        Only keys the radio lacks are added, and with no route (flood), so a
+        stale path is never used; each finds its route again when used."""
+        mc = self._mc()
+        await self._cmd(lambda mc: mc.ensure_contacts(follow=True), 60)
+        have = set(mc.contacts)
+        added, failed = 0, []
+        for row in a.get("contacts") or []:
+            key = str(row.get("key") or "").lower()
+            if len(key) != 64 or key in have:
+                continue
+            name = str(row.get("name") or "").encode()[:31].decode("utf-8", "ignore")
+            c = {"public_key": key, "type": int(row.get("type_id") or 1), "flags": 0,
+                 "out_path": "", "out_path_len": -1, "out_path_hash_mode": 0,
+                 "adv_name": name, "last_advert": int(row.get("last_advert") or 0),
+                 "adv_lat": float(row.get("lat") or 0), "adv_lon": float(row.get("lon") or 0)}
+            try:
+                r = await self._cmd(lambda mc, c=c: mc.commands.add_contact(c))
+            except Exception as e:
+                log.exception("web: import of contact %s (%s) failed", name, key[:12])
+                failed.append(f"{name}: {type(e).__name__}")
+                continue
+            if r is None or r.type == EventType.ERROR:
+                log.error("web: radio refused contact %s (%s): %s", name, key[:12],
+                          getattr(r, "payload", None))
+                failed.append(name)
+                continue
+            added += 1
+            have.add(key)
+        await self._cmd(lambda mc: mc.ensure_contacts(follow=True), 60)
+        log.info("web: imported %d contact(s), %d failed", added, len(failed))
+        return {"added": added, "failed": failed, "now": len(mc.contacts)}
+
     async def post_channel(self, a) -> Dict:
         i = int(a.get("idx"))
         name = str(a.get("name") or "").strip()
