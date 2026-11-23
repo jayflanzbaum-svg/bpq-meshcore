@@ -594,9 +594,13 @@ class UserState:
 
 async def send_lines(session: "NodeSession", body: str) -> None:
     """One mesh message can hold several lines (a BBS message body ending
-    in /EX). BPQ reads one line per CR, so send each line on its own;
-    sent as one line, the BBS never sees /EX and keeps waiting for text."""
-    for line in body.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+    in /EX). Each goes as its own line, with a pause between them: BPQ
+    telnet reads only the first line of a packet that holds "text CR /ex
+    CR", so the BBS never saw /EX and kept taking commands as text."""
+    lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    for i, line in enumerate(lines):
+        if i:
+            await asyncio.sleep(0.5)
         await session.send_line(line.rstrip())
 
 
