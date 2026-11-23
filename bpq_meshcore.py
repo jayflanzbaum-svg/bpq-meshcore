@@ -581,6 +581,30 @@ def verify_callsign(url_tmpl: str, call: str) -> Dict:
 
 # ---------------------------------------------------------------- bridge
 
+# A radio reboot once came back with 109 of its 239 contacts; the radio can
+# only decrypt DMs from contacts, so the dropped users could not get in.
+CONTACT_BACKUP = HERE / "logs" / "contacts-backup.json"
+CONTACT_BACKUP_EVERY_S = 1800
+CONTACT_KEEP = ("public_key", "type", "flags", "adv_name", "last_advert",
+                "adv_lat", "adv_lon")
+
+
+def load_contact_backup() -> Dict[str, Dict]:
+    try:
+        return json.loads(CONTACT_BACKUP.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        log.exception("could not read %s", CONTACT_BACKUP)
+        return {}
+
+
+def save_contact_backup(backup: Dict[str, Dict]) -> None:
+    tmp = CONTACT_BACKUP.with_suffix(".tmp")
+    tmp.write_text(json.dumps(backup, indent=1), encoding="utf-8")
+    tmp.replace(CONTACT_BACKUP)
+
+
 class UserState:
     def __init__(self) -> None:
         self.session: Optional[NodeSession] = None
@@ -1103,6 +1127,61 @@ class Bridge:
                     await s.close()
                     await self.say(f"{name}: disconnected after {limit // 60} min idle.", st.dest)
 
+    async def contacts_keeper(self) -> None:
+        """Back up the radio's contacts every CONTACT_BACKUP_EVERY_S, and
+        right after connecting (the radio reboots when the port opens) put
+        back any the backup has and the radio lost."""
+        first = True
+        while True:
+            try:
+                await self.contacts_pass(restore=first)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("contact backup/restore failed")
+            first = False
+            await asyncio.sleep(CONTACT_BACKUP_EVERY_S)
+
+    async def contacts_pass(self, restore: bool) -> None:
+        async with self.radio_lock:
+            r = await self.mc.commands.get_contacts(lastmod=0, timeout=10)
+        if r.type == EventType.ERROR:
+            log.error("contact backup: could not read contacts: %s", r.payload)
+            return
+        have = dict(r.payload or {})
+        backup = load_contact_backup()
+        missing = [c for k, c in backup.items() if k not in have] if restore else []
+        if missing:
+            log.warning("radio has %d contacts, %d fewer than the backup; putting them back",
+                        len(have), len(missing))
+            n = 0
+            for c in missing:
+                # No route: a path saved before the reboot may be stale.
+                c = {**c, "out_path": "", "out_path_len": -1, "out_path_hash_mode": 0}
+                async with self.radio_lock:
+                    res = await self.mc.commands.add_contact(c)
+                if res is None or res.type == EventType.ERROR:
+                    log.error("could not restore contact %s (%s): %s", c.get("adv_name"),
+                              c["public_key"][:12], getattr(res, "payload", None))
+                    continue
+                n += 1
+                have[c["public_key"]] = c
+            log.info("restored %d of %d missing contacts", n, len(missing))
+            async with self.radio_lock:      # so the page's list shows them
+                await self.mc.commands.get_contacts(lastmod=0, timeout=10)
+        if backup and len(have) < 0.9 * len(backup):
+            # A damaged list must not replace a good backup.
+            log.warning("contact backup not updated: radio has %d, backup has %d",
+                        len(have), len(backup))
+            return
+        save_contact_backup({k: {f: c.get(f) for f in CONTACT_KEEP} for k, c in have.items()})
+
+    def forget_contact(self, key: str) -> None:
+        """A contact removed on purpose must not come back after a reboot."""
+        backup = load_contact_backup()
+        if backup.pop(key, None) is not None:
+            save_contact_backup(backup)
+
     async def advertiser(self) -> None:
         hours = self.cfg["adverts"].get("flood_every_h") or 0
         while True:
@@ -1164,7 +1243,8 @@ class Bridge:
                  sum(1 for m in self.members.values() if m.get("status") == "approved"))
         tasks = [asyncio.create_task(self.idle_reaper()),
                  asyncio.create_task(self.notice_retrier()),
-                 asyncio.create_task(self.advertiser())]
+                 asyncio.create_task(self.advertiser()),
+                 asyncio.create_task(self.contacts_keeper())]
         try:
             while self.mc.is_connected:
                 await asyncio.sleep(5)

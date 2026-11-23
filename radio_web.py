@@ -557,6 +557,8 @@ class RadioWeb:
         c = self._contact(a.get("key"))
         _ok(await self._cmd(lambda mc: mc.commands.remove_contact(c["public_key"])))
         self._mc().contacts.pop(c["public_key"], None)
+        if hasattr(self.bridge, "forget_contact"):
+            self.bridge.forget_contact(c["public_key"])
         log.info("web: removed contact %s (%s)", c.get("adv_name"), c["public_key"][:12])
         return {"done": True}
 
@@ -599,7 +601,9 @@ class RadioWeb:
                 continue
             added += 1
             have.add(key)
-        await self._cmd(lambda mc: mc.ensure_contacts(follow=True), 60)
+        # A full re-read: ensure_contacts skips it unless the radio said
+        # something changed, so the new contacts would not show yet.
+        await self._cmd(lambda mc: mc.commands.get_contacts(lastmod=0, timeout=10), 60)
         log.info("web: imported %d contact(s), %d failed", added, len(failed))
         return {"added": added, "failed": failed, "now": len(mc.contacts)}
 
