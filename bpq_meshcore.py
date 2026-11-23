@@ -619,6 +619,7 @@ class Bridge:
         self.members = load_members()
         self.seen_dm = {}                  # (key, sender time, text) -> when seen
         self.greeted = set()               # guests already given the welcome
+        self.signups = {}                  # radio key -> signup questions in progress
         self.by_key = {}
         for name, u in cfg["users"].items():
             kp = key_prefix(u.get("pubkey", ""))
@@ -626,13 +627,15 @@ class Bridge:
                 self.by_key[kp] = name
 
     # -- radio out
-    async def say(self, text: str, dest: Optional[str] = None) -> None:
-        """Send one mesh message: to the channel, or as a DM to `dest`."""
+    async def say(self, text: str, dest: Optional[str] = None) -> bool:
+        """Send one mesh message: to the channel, or as a DM to `dest`.
+        True when sent (a DM: when the radio acknowledged it)."""
+        acked = True
         async with self.radio_lock:
             if dest is None:
                 if self.chan is None:
                     log.error("no channel configured; dropped %r", text[:40])
-                    return
+                    return False
                 r = await self.mc.commands.send_chan_msg(self.chan, text)
                 if r.type == EventType.ERROR:
                     log.error("send_chan_msg failed: %s", r.payload)
@@ -652,6 +655,7 @@ class Bridge:
                                     name=self.web.contact_name(dest), via="bridge",
                                     acked=acked)
             await asyncio.sleep(self.cfg["paging"]["gap_s"])
+        return acked
 
     async def page_out(self, st: UserState) -> None:
         p = self.cfg["paging"]
@@ -817,12 +821,15 @@ class Bridge:
         await send_lines(st.session, body)
 
     # -- guests and members
-    async def reply(self, text: str, dest: Optional[str]) -> None:
-        """say(), split to the mesh message size like node output is."""
+    async def reply(self, text: str, dest: Optional[str]) -> bool:
+        """say(), split to the mesh message size like node output is.
+        True when every part was acknowledged."""
         # Not paged (no M=More note), so a message can be nearly full: room is
         # left only for the " (1/2)" marker.
+        ok = True
         for c in number_parts(chunk_text(text, MSG_MAX - 8)):
-            await self.say(c, dest)
+            ok = await self.say(c, dest) and ok
+        return ok
 
     def member(self, kp: str) -> Optional[Dict]:
         m = self.members.get(kp)
@@ -874,6 +881,10 @@ class Bridge:
             await self.reply(f"Welcome to {self.cfg['guests']['title']}!\n"
                              + self.guest_menu(kp), kp)
             return
+        if kp in self.signups:
+            await self.signup_answer(name, kp, body)
+            return
+        await self.send_notice(kp)       # an approval it missed while off air
         if body.upper() == "M" and st.pending:
             await self.page_out(st)
             return
@@ -928,18 +939,61 @@ class Bridge:
             await self.reply(f"{call} is not in the FCC database (US licenses only "
                            "for now). Check it and send CALL again.", kp)
             return
-        self.members[kp] = {"callsign": call, "name": v["name"],
+        self.signups[kp] = {"step": "name", "call": call, "v": v, "started": time.monotonic()}
+        await self.reply(f"{call}: a few questions for the sysop. (CANCEL to stop)\n"
+                         "1/3 Your first and last name?", kp)
+
+    async def signup_answer(self, name: str, kp: str, body: str) -> None:
+        """One answer in the signup questions: name, city/state, email."""
+        s = self.signups[kp]
+        text = " ".join(body.split())
+        if text.upper() in ("CANCEL", "STOP", "QUIT") or time.monotonic() - s["started"] > 1800:
+            del self.signups[kp]
+            await self.reply("Signup cancelled. Send MYCALL <callsign> to start again.", kp)
+            return
+        if s["step"] == "name":
+            if len(text) < 2:
+                await self.reply("1/3 Your first and last name?", kp)
+                return
+            s["name"], s["step"] = text[:40], "city"
+            await self.reply("2/3 City and state? (e.g. Boca Raton FL)", kp)
+        elif s["step"] == "city":
+            if len(text) < 2:
+                await self.reply("2/3 City and state? (e.g. Boca Raton FL)", kp)
+                return
+            s["city"], s["step"] = text[:40], "email"
+            await self.reply("3/3 Email for a welcome note? (SKIP for none)", kp)
+        else:
+            if text.upper() in ("SKIP", "NONE", "NO", "N"):
+                s["email"] = ""
+            elif re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", text):
+                s["email"] = text[:80]
+            else:
+                await self.reply("That doesn't look like an email. Send it again, or SKIP.", kp)
+                return
+            del self.signups[kp]
+            await self.finish_signup(name, kp, s)
+
+    async def finish_signup(self, name: str, kp: str, s: Dict) -> None:
+        call, v = s["call"], s["v"]
+        self.members[kp] = {"callsign": call, "name": s["name"], "city": s["city"],
+                            "email": s["email"], "fcc_name": v["name"],
                             "oper_class": v["oper_class"], "verified": v["status"] == "VALID",
                             "status": "pending",
                             "requested": datetime.now().isoformat(timespec="seconds")}
         save_members(self.members)
-        first = v["name"].split()[0] if v["name"] else call
-        await self.reply(f"Thanks {first}. {call} is waiting for sysop approval; "
-                       "you'll get a message here.", kp)
-        who = f"{call} ({v['name'] or 'name unknown'}"
+        first = s["name"].split()[0]
+        await self.reply(f"Thanks {first}! {call} is waiting for sysop approval. Send BYE "
+                         "and turn your radio off if you like: we message you "
+                         "when it is approved, and retry until you are back on air.", kp)
+        who = f"{call} ({s['name']}, {s['city']}"
         who += f", {v['oper_class']})" if v["oper_class"] else ")"
         if v["status"] != "VALID":
             who += " - NOT verified, lookup failed"
+        elif v["name"] and v["name"].split()[-1].lower() not in s["name"].lower():
+            who += f" - FCC name is {v['name']}"
+        if s["email"]:
+            who += f", {s['email']}"
         log.info("[%s] signup request: %s, radio %s", name, who, kp)
         await self.tell_admins(f"Signup: {who}. Reply APPROVE {call} or DENY {call}.")
         await asyncio.to_thread(self.notify, f"Mesh signup: {call}",
@@ -1002,11 +1056,38 @@ class Bridge:
         for kp, m in list(self.members.items()):
             if m.get("callsign") != call:
                 continue
-            if cmd == "APPROVE":
-                await self.reply(f"Welcome {call}! You are approved. Send ? for your menu.", kp)
-            else:
-                await self.reply("Sorry, your request was not approved. Guest access "
-                               "still works: send ?", kp)
+            m["notice"] = cmd
+            save_members(self.members)
+            await self.send_notice(kp)
+
+    async def send_notice(self, kp: str) -> None:
+        """Deliver the approval/denial DM; keep it queued until the radio acks."""
+        m = self.members.get(kp) or {}
+        cmd = m.get("notice")
+        if not cmd:
+            return
+        m.pop("notice")                    # no second sender while this one waits
+        if cmd == "APPROVE":
+            ok = await self.reply(f"Welcome {m['callsign']}! You are approved. "
+                                  "Send ? for your menu.", kp)
+        else:
+            ok = await self.reply("Sorry, your request was not approved. Guest access "
+                                  "still works: send ?", kp)
+        if not ok:
+            m["notice"] = cmd              # radio off or out of range: try again later
+            log.info("%s: %s notice not delivered, will retry", m["callsign"], cmd.lower())
+        save_members(self.members)
+
+    async def notice_retrier(self) -> None:
+        """Every 10 min, retry approval DMs that were not acknowledged."""
+        while True:
+            await asyncio.sleep(600)
+            for kp, m in list(self.members.items()):
+                if m.get("notice"):
+                    try:
+                        await self.send_notice(kp)
+                    except Exception:
+                        log.exception("notice retry for %s failed", kp)
 
     # -- housekeeping
     async def idle_reaper(self) -> None:
@@ -1082,6 +1163,7 @@ class Bridge:
                  "on" if self.cfg["guests"].get("enabled") else "off",
                  sum(1 for m in self.members.values() if m.get("status") == "approved"))
         tasks = [asyncio.create_task(self.idle_reaper()),
+                 asyncio.create_task(self.notice_retrier()),
                  asyncio.create_task(self.advertiser())]
         try:
             while self.mc.is_connected:
