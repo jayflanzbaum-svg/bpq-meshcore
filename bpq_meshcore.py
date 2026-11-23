@@ -592,6 +592,14 @@ class UserState:
         self.close_note: Optional[str] = None  # sent when the session ends
 
 
+async def send_lines(session: "NodeSession", body: str) -> None:
+    """One mesh message can hold several lines (a BBS message body ending
+    in /EX). BPQ reads one line per CR, so send each line on its own;
+    sent as one line, the BBS never sees /EX and keeps waiting for text."""
+    for line in body.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        await session.send_line(line.rstrip())
+
+
 def key_prefix(k: str) -> str:
     return re.sub(r"[^0-9a-f]", "", (k or "").lower())[:12]
 
@@ -802,7 +810,7 @@ class Bridge:
         bare = self.cfg["bbs"].get("bare_list")
         if bare and st.session.in_bbs and body.strip().upper() == "L":
             body = bare                 # a bare L would list every message
-        await st.session.send_line(body)
+        await send_lines(st.session, body)
 
     # -- guests and members
     async def reply(self, text: str, dest: Optional[str]) -> None:
@@ -874,7 +882,7 @@ class Bridge:
             if word in (w.upper() for w in blocked):
                 await self.reply(self.cfg["telnet_only"]["message"], kp)
                 return
-            await st.session.send_line(body)
+            await send_lines(st.session, body)
             return
 
         apps = self.guest_apps(kp)
