@@ -122,7 +122,7 @@ DEFAULT_CONFIG = {
     #   join_after:  a blank line right after a line starting with one of
     #                these is dropped, e.g. ["Source:"] for the WX report.
     "display": {"node_prefix": None, "command_sep": None, "welcome": [],
-                "compact_lists": False, "bbs_prompt": None,
+                "compact_lists": False, "compact_spots": False, "bbs_prompt": None,
                 "menu_on_return": False, "app_names": None, "join_after": []},
     "users": {
         "N0CALL-Phone": {
@@ -279,6 +279,23 @@ def compact_list_line(line: str) -> str:
     return out
 
 
+# ANALYZE's "Top paths" table: a header and "Dallas TX   NW   1050    19" rows.
+_SPOTS_HEAD = re.compile(r"^\s+PLACE\s+DIR\s+MILES\s+SPOTS\s*$")
+_SPOTS_ROW = re.compile(r"^\s+(?P<city>.+?)\s+(?P<st>[A-Z]{2})\s+(?P<dir>[NSEW]{1,3})"
+                        r"\s+(?P<mi>\d+)\s+(?P<n>\d+)\s*$")
+
+
+def compact_spots_line(line: str) -> str:
+    """'PLACE: DIR-MILES-SPOTS' and 'Dallas,TX: NW-1050-19'. Other lines
+    come back unchanged."""
+    if _SPOTS_HEAD.match(line):
+        return "PLACE: DIR-MILES-SPOTS"
+    m = _SPOTS_ROW.match(line)
+    if m:
+        return f"{m['city']},{m['st']}: {m['dir']}-{m['mi']}-{m['n']}"
+    return line
+
+
 _BBS_PROMPT = re.compile(r"^de [A-Z0-9-]{3,9}>\s*$")
 _RETURNED = re.compile(r"^Returned to Node \S+\s*$")
 _CONNECTED_BBS = re.compile(r"Connected to BBS\b", re.I)
@@ -312,6 +329,8 @@ def mesh_format(text: str, display: Dict) -> str:
                 line = f"*Connected to {names.get(m[1], m[1])}*"
         if compact:
             line = compact_list_line(line)
+        if display.get("compact_spots"):
+            line = compact_spots_line(line)
         m = _NODE_PREFIX.match(line)
         if m:
             rest = line[m.end():]

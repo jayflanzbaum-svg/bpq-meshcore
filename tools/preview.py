@@ -66,6 +66,7 @@ class PreviewBridge(b.Bridge):
         print(f"--- msg {self.count}: {n}/{b.MSG_MAX} bytes, ~{ms / 1000:.1f} s air{flag}")
         for line in text.split("\n"):
             print("    " + line)
+        return True                       # the real say() returns whether it was acked
 
     async def admin_command(self, name, body, dest):
         if (body.split() or [""])[0].upper() in ("APPROVE", "DENY", "PENDING"):
