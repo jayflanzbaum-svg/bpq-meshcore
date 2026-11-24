@@ -80,6 +80,8 @@ class RadioWeb:
         self.ver = 0                             # bumped on every new or changed message
         self.by_hash: Dict[int, Dict] = {}       # channel msg_hash -> message
         self.rxlog: deque = deque(maxlen=400)    # recent RF log entries (every packet heard)
+        self.pkts: deque = deque(maxlen=300)     # packets for the map's live animation
+        self.pkt_id = 0
         self.server: Optional[asyncio.base_events.Server] = None
         self.device: Dict = {}
         self.logins: Dict[str, float] = {}       # repeater key -> time logged in
@@ -176,6 +178,7 @@ class RadioWeb:
         if e["ptype"] == 2 and len(pl) >= 2:     # TXT_MSG (a DM): dest hash, src hash
             e["dst"], e["src"] = pl[:1].hex(), pl[1:2].hex()
         self.rxlog.append(e)
+        self.note_packet(p, e)
         m = self.by_hash.get(e.get("mh"))
         if m is None:
             return
@@ -185,6 +188,90 @@ class RadioWeb:
             return                                 # same copy heard again
         rows.append(self._heard_row(e))
         self.update(m, **{key: rows})
+
+    def note_packet(self, p: Dict, e: Dict) -> None:
+        """Keep a heard packet for the map animation: what it is, which
+        channel, who sent it (when the packet says), and the repeaters it
+        passed through (resolved to places by get_packets)."""
+        typ = str(p.get("payload_typename") or "")
+        pl = p.get("pkt_payload") or b""
+        d = {"t": e["t"], "typ": typ, "route": e.get("route"), "path": e["path"],
+             "phs": e["phs"], "snr": e.get("snr")}
+        if typ == "GRP_TXT":
+            d["chan"] = p.get("chan_name") or ""
+            d["chash"] = p.get("chan_hash") or ""
+            who, sep, _ = str(p.get("message") or "").partition(": ")
+            if sep:
+                d["who"] = who
+        elif typ == "ADVERT" and len(pl) >= 32:
+            d["src"] = pl[:32].hex()
+        elif typ == "TEXT_MSG" and len(pl) >= 2:
+            d["src"] = pl[1:2].hex()               # 1-byte hash only
+        self.pkt_id += 1
+        d["id"] = self.pkt_id
+        self.pkts.append(d)
+
+    def _place(self, c: Dict):
+        lat, lon = c.get("adv_lat") or 0, c.get("adv_lon") or 0
+        return (lat, lon) if lat or lon else None
+
+    def _resolve_packet(self, d: Dict, mc, me) -> Dict:
+        """Add `pts`: [lat, lon, name] from the sender through each repeater
+        to this radio, skipping any hop that cannot be placed."""
+        contacts = list(mc.contacts.items())
+        pts = []
+        if me:
+            pts.append([me[0], me[1], "this radio"])
+        nxt, size = me, int(d["phs"]) * 2
+        path = d["path"]
+        hops = [path[i:i + size] for i in range(0, len(path), size)]
+        skipped = 0
+        for h in reversed(hops):
+            placed = [(k, self._place(c), c) for k, c in contacts if k.startswith(h)]
+            placed = [(k, pl, c) for k, pl, c in placed if pl]
+            reps = [x for x in placed if x[2].get("type") in (2, 3)] or placed
+            pick = None
+            if reps:
+                pick = min(reps, key=lambda x: ((x[1][0] - nxt[0]) ** 2 + (x[1][1] - nxt[1]) ** 2)
+                           if nxt else 0)
+            if pick is None:
+                skipped += 1
+                continue
+            pts.append([pick[1][0], pick[1][1], pick[2].get("adv_name", "")])
+            nxt = pick[1]
+        origin = None
+        src, who = d.get("src"), d.get("who")
+        if src:
+            for k, c in contacts:
+                if k.startswith(src) and self._place(c) and (len(src) > 2 or c.get("type") == 1):
+                    origin = c
+                    break
+        elif who:
+            for k, c in contacts:
+                if c.get("adv_name") == who and self._place(c):
+                    origin = c
+                    break
+        if origin:
+            pl = self._place(origin)
+            if not pts or [pl[0], pl[1]] != pts[-1][:2]:
+                pts.append([pl[0], pl[1], origin.get("adv_name", "")])
+        pts.reverse()                              # sender first, this radio last
+        return {"pts": pts, "skipped": skipped, "from": (origin or {}).get("adv_name") or who or ""}
+
+    async def get_packets(self, q) -> Dict:
+        """Packets heard since id `since` (-1: just the latest id), for the map."""
+        mc = self._mc()
+        since = int(q.get("since") or 0)
+        if since < 0:
+            return {"pkts": [], "last": self.pkt_id}
+        sel = mc.self_info or {}
+        me = (sel.get("adv_lat"), sel.get("adv_lon"))
+        me = me if (me[0] or me[1]) else None
+        out = []
+        for d in list(self.pkts):
+            if d["id"] > since:
+                out.append({**d, **self._resolve_packet(d, mc, me)})
+        return {"pkts": out[-80:], "last": self.pkt_id}
 
     def _rx_for_dm(self, prefix: str) -> Optional[Dict]:
         """The RF log entry of a DM just received from `prefix`, if we can tell."""

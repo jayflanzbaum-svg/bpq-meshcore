@@ -286,6 +286,7 @@ pre.out { margin: 8px 16px 0; background: var(--bg); border: 1px solid var(--lin
       <button class="chip on" data-mf="">All</button><button class="chip" data-mf="1">Companions</button>
       <button class="chip" data-mf="2">Repeaters</button><button class="chip" data-mf="3">Rooms</button><button class="chip" data-mf="4">Sensors</button>
       <span class="grow"></span><button class="chip" id="mapSetMe">Set my position</button></div>
+    <div class="mapbar" id="liveChips" style="top:46px"></div>
     <div class="mapnote" id="mapNote" hidden></div>
     <div class="legend"><span><i style="background:var(--t-companion)"></i>Companion</span><span><i style="background:var(--t-repeater)"></i>Repeater</span>
       <span><i style="background:var(--t-room)"></i>Room</span><span><i style="background:var(--t-sensor)"></i>Sensor</span><span><i style="background:#e5534b"></i>This radio</span></div>
@@ -390,7 +391,7 @@ function go(v) {
   $("#menu").classList.remove("on");
   if (v === "contacts") renderContacts();
   if (v === "channels") loadChannels();
-  if (v === "map") showMap();
+  if (v === "map") { showMap(); renderLiveChips(); }
   if (v === "settings") { loadStats(); fillSettings(); }
   if (v === "gateway") renderGateway();
   setTitle();
@@ -760,6 +761,88 @@ function showMap() {
   }
 }
 
+
+// ---------------- live packets on the map
+// Packets this radio hears, drawn from the sender through each repeater to
+// this radio. Only repeaters and senders with a position can be placed.
+let live = localStorage.getItem("live") !== "0", liveF = localStorage.getItem("liveF") || "";
+let liveLast = -1, liveNames = new Set(), anims = [], liveLayer = null, liveRaf = 0, liveSeen = [];
+const KIND_COLOR = {adv: "#8b9bb4", dm: "#2fb344", pub: "#f0a30a"}, PALETTE = ["#e5534b", "#3b82f6", "#a855f7", "#14b8a6", "#ec4899", "#84cc16"];
+function pktKind(p) { return p.typ === "ADVERT" ? "adv" : p.typ === "TEXT_MSG" ? "dm" : p.typ === "GRP_TXT" ? "ch:" + (p.chan || "?" + p.chash) : ""; }
+function kindColor(k) {
+  if (KIND_COLOR[k]) return KIND_COLOR[k];
+  const n = k.slice(3); if (/^#?public$/i.test(n)) return KIND_COLOR.pub;
+  let h = 0; for (const ch of n) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length];
+}
+function kindLabel(k) { return k === "adv" ? "Adverts" : k === "dm" ? "Direct messages" : k.slice(3).startsWith("?") ? "Unknown channel " + k.slice(4) : k.slice(3); }
+function renderLiveChips() {
+  const names = new Set([...liveNames, ...channels.map(c => "ch:" + c.name)]);
+  const ks = ["adv", "dm", ...[...names].sort()];
+  $("#liveChips").innerHTML = `<button class="chip ${live ? "on" : ""}" data-live="toggle">${live ? "● Live" : "○ Live off"}</button>` +
+    ["", ...ks].map(k => `<button class="chip ${liveF === k ? "on" : ""}" data-lf="${esc(k)}">${k ? `<i style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;background:${kindColor(k)}"></i>` : ""}${esc(k ? kindLabel(k) : "All packets")}</button>`).join("") +
+    `<span class="chip" id="liveCount" style="box-shadow:none"></span>`;
+}
+$("#liveChips").onclick = e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.live) { live = !live; try { localStorage.setItem("live", live ? "1" : "0"); } catch (x) {} if (!live) clearAnims(); }
+  else if (b.dataset.lf !== undefined) { liveF = b.dataset.lf; try { localStorage.setItem("liveF", liveF); } catch (x) {} }
+  renderLiveChips();
+};
+function clearAnims() { for (const a of anims) { a.dot && a.dot.remove(); a.trail && a.trail.remove(); } anims = []; }
+function addAnim(p, delay) {
+  const k = pktKind(p), color = kindColor(k), pts = p.pts;
+  if (!pts.length) return;
+  anims.push({pts, color, start: performance.now() + delay, segMs: 700, fadeMs: 3000, dot: null, trail: null});
+  if (!liveRaf) liveRaf = requestAnimationFrame(liveTick);
+}
+function liveTick(now) {
+  liveRaf = 0;
+  if (!map || !liveLayer) return;
+  anims = anims.filter(a => {
+    const el = now - a.start; if (el < 0) return true;
+    const segs = Math.max(a.pts.length - 1, 1), total = segs * a.segMs;
+    if (a.pts.length === 1) {                                   // heard with no placeable path: a ring where it landed
+      if (!a.dot) a.dot = L.circleMarker([a.pts[0][0], a.pts[0][1]], {radius: 4, color: a.color, weight: 2, fill: false}).addTo(liveLayer);
+      const f = Math.min(el / 1200, 1); a.dot.setRadius(4 + 22 * f); a.dot.setStyle({opacity: 1 - f});
+      if (f >= 1) { a.dot.remove(); return false; } return true;
+    }
+    if (el >= total + a.fadeMs) { a.trail && a.trail.remove(); return false; }
+    const i = Math.min(Math.floor(el / a.segMs), segs - 1), f = Math.min((el - i * a.segMs) / a.segMs, 1);
+    const A = a.pts[i], B = a.pts[i + 1], pos = [A[0] + (B[0] - A[0]) * f, A[1] + (B[1] - A[1]) * f];
+    const line = el < total ? [...a.pts.slice(0, i + 1).map(q => [q[0], q[1]]), pos] : a.pts.map(q => [q[0], q[1]]);
+    if (!a.trail) a.trail = L.polyline(line, {color: a.color, weight: 3, opacity: .9}).addTo(liveLayer);
+    else a.trail.setLatLngs(line);
+    if (el < total) {
+      if (!a.dot) a.dot = L.circleMarker(pos, {radius: 6, color: "#fff", weight: 1.5, fillColor: a.color, fillOpacity: 1}).addTo(liveLayer);
+      else a.dot.setLatLng(pos);
+    } else {
+      if (a.dot) { a.dot.remove(); a.dot = null; }
+      a.trail.setStyle({opacity: .9 * (1 - (el - total) / a.fadeMs)});
+    }
+    return true;
+  });
+  if (anims.length) liveRaf = requestAnimationFrame(liveTick);
+}
+async function pollLive() {
+  if (view !== "map" || !map || document.hidden) { liveLast = -1; return; }   // restart from "now" when you come back
+  if (!liveLayer) liveLayer = L.layerGroup().addTo(map);
+  try {
+    const r = await api("packets?since=" + liveLast);
+    liveLast = r.last;
+    const now = Date.now(); liveSeen = liveSeen.filter(t => now - t < 60000);
+    let fresh = false, n = 0;
+    for (const p of r.pkts) {
+      const k = pktKind(p); if (!k) continue;
+      if (!liveNames.has(k) && k.startsWith("ch:")) { liveNames.add(k); fresh = true; }
+      liveSeen.push(now);
+      if (!live || (liveF && liveF !== k)) continue;
+      addAnim(p, n++ * 250);
+    }
+    if (fresh) renderLiveChips();
+    const c = $("#liveCount"); if (c) c.textContent = liveSeen.length + " heard / min";
+  } catch (e) { console.warn("live packets failed", e); }
+}
+
 // ---------------- settings
 async function loadStats() { try { stats = await api("stats"); } catch (e) { toast(e.message, true); } renderInfo(); }
 function renderInfo() {
@@ -834,7 +917,7 @@ $("#mTable").onclick = e => { const d = e.target.dataset; if (!d.approve && !d.d
 (async () => {
   await loadState(); await Promise.all([loadContacts(), loadChannels()]); await loadMessages();
   go("chats");
-  setInterval(loadMessages, 2000); setInterval(loadState, 10000);
+  setInterval(loadMessages, 2000); setInterval(loadState, 10000); setInterval(pollLive, 2000);
 })();
 </script>
 </body>
