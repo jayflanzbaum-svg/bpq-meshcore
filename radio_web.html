@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mesh Radio</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script>try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <style>
 :root {
   --bg: #f4f6fa; --surface: #ffffff; --surface2: #eef1f6; --text: #1a1d23; --muted: #5f6877;
@@ -15,7 +16,7 @@
   --shadow: 0 1px 2px rgba(16,24,40,.08), 0 1px 3px rgba(16,24,40,.06);
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #11151b; --surface: #1a2029; --surface2: #222a35; --text: #e7eaef; --muted: #9aa4b2;
     --line: #2b3440; --bar: #0b0f14; --bar-text: #e7eaef; --bar-muted: #8d97a5;
     --accent: #6b9cf2; --accent-soft: #23314a; --on-accent: #0b0f14;
@@ -23,6 +24,14 @@
     --t-companion: #6b9cf2; --t-repeater: #5cc98a; --t-room: #b98cf0; --t-sensor: #f0a54a;
     --shadow: none;
   }
+}
+:root[data-theme="dark"] {
+    --bg: #11151b; --surface: #1a2029; --surface2: #222a35; --text: #e7eaef; --muted: #9aa4b2;
+    --line: #2b3440; --bar: #0b0f14; --bar-text: #e7eaef; --bar-muted: #8d97a5;
+    --accent: #6b9cf2; --accent-soft: #23314a; --on-accent: #0b0f14;
+    --in: #222a35; --out: #263a5c; --good: #5cc98a; --bad: #f07167; --warn: #f0a54a;
+    --t-companion: #6b9cf2; --t-repeater: #5cc98a; --t-room: #b98cf0; --t-sensor: #f0a54a;
+    --shadow: none;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -237,6 +246,7 @@ pre.out { margin: 8px 16px 0; background: var(--bg); border: 1px solid var(--lin
     <button data-adv="0"><svg class="i"><use href="#i-advert"/></svg>Send zero-hop advert</button>
     <button data-adv="1"><svg class="i"><use href="#i-advert"/></svg>Send flood advert</button>
     <hr>
+    <button id="mTheme"><svg class="i"><use href="#i-settings"/></svg><span id="mThemeLbl">Dark view</span></button>
     <button id="mRefresh"><svg class="i"><use href="#i-refresh"/></svg>Refresh contacts</button>
   </div>
 </header>
@@ -404,6 +414,10 @@ function setTitle() {
 }
 $$("#nav button").forEach(b => b.onclick = () => { if (b.dataset.v === "chats" && view === "chats" && !wide()) closeChat(); go(b.dataset.v); });
 $("#backBtn").onclick = () => view === "chats" ? closeChat() : go("chats");
+function isDark() { const t = document.documentElement.dataset.theme; return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; }
+function themeLabel() { $("#mThemeLbl").textContent = isDark() ? "Light view" : "Dark view"; }
+$("#mTheme").onclick = () => { try { localStorage.setItem("theme", isDark() ? "light" : "dark"); } catch (e) {} location.reload(); };
+themeLabel();
 $("#menuBtn").onclick = e => { e.stopPropagation(); $("#menu").classList.toggle("on"); };
 document.addEventListener("click", e => { if (!e.target.closest("#menu")) $("#menu").classList.remove("on"); });
 $$("[data-go]").forEach(b => b.onclick = () => go(b.dataset.go));
@@ -714,7 +728,7 @@ function mapNote() {
 function showMap() {
   if (!window.L) { $("#map").innerHTML = '<div class="empty">The map needs internet access to load.</div>'; return; }
   if (!map) {
-    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    const dark = isDark();
     map = L.map("map").setView([26.4, -80.1], 9);
     L.tileLayer(`https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${dark ? "Dark" : "Light"}_Gray_Base/MapServer/tile/{z}/{y}/{x}`,
       {maxZoom: 16, attribution: "Tiles © Esri · places © OpenStreetMap"}).addTo(map);
