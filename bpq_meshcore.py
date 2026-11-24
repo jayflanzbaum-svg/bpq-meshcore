@@ -286,13 +286,13 @@ _SPOTS_ROW = re.compile(r"^\s+(?P<city>.+?)\s+(?P<st>[A-Z]{2})\s+(?P<dir>[NSEW]{
 
 
 def compact_spots_line(line: str) -> str:
-    """'PLACE: DIR-MILES-SPOTS' and 'Dallas,TX: NW-1050-19'. Other lines
+    """'PLACE: DIR-MILES-SPOTS' and 'Dallas, TX: NW-1050mi-19'. Other lines
     come back unchanged."""
     if _SPOTS_HEAD.match(line):
         return "PLACE: DIR-MILES-SPOTS"
     m = _SPOTS_ROW.match(line)
     if m:
-        return f"{m['city']},{m['st']}: {m['dir']}-{m['mi']}-{m['n']}"
+        return f"{m['city']}, {m['st']}: {m['dir']}-{m['mi']}mi-{m['n']}"
     return line
 
 
