@@ -304,7 +304,11 @@ class RadioWeb:
         try:
             writer.write(f"HTTP/1.1 {status} {reason}\r\nContent-Type: {ctype}\r\n"
                          f"Content-Length: {len(out)}\r\nCache-Control: no-store\r\n"
-                         "X-Frame-Options: DENY\r\nConnection: close\r\n\r\n".encode() + out)
+                         # Only the node's live console (BPQ-Dashboard, port 5998) may frame
+                         # this page, for its popover; every other site is still refused.
+                         "Content-Security-Policy: frame-ancestors "
+                         "http://127.0.0.1:5998 http://localhost:5998\r\n"
+                         "Connection: close\r\n\r\n".encode() + out)
             await writer.drain()
         except ConnectionError:
             pass
