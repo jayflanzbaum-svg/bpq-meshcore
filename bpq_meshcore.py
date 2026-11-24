@@ -102,6 +102,8 @@ DEFAULT_CONFIG = {
         "verify_url": "https://callook.info/{call}/json",
         "notify_project": None,      # notify-hub project for signup alerts
         "notify_path": None,         # folder holding notify_hub.py
+        "welcome_url": None,         # public page linked in the welcome email
+        "welcome_email": True,       # email approved signups that gave an address
     },
     # Commands that move files or speak a binary protocol, which a mesh text
     # message cannot carry. Keyed by where the user is: "NODE", "BBS" or an
@@ -1083,6 +1085,39 @@ class Bridge:
             m["notice"] = cmd
             save_members(self.members)
             await self.send_notice(kp)
+            if cmd == "APPROVE":
+                await asyncio.to_thread(self.welcome_email, m)
+                save_members(self.members)
+
+    def welcome_email(self, m: Dict) -> None:
+        """Email an approved signup who gave an address, once, through the
+        same notify-hub mail account as the sysop alerts."""
+        g = self.cfg["guests"]
+        to = m.get("email") or ""
+        if not to or m.get("welcome_emailed") or not g.get("welcome_email") \
+                or not g.get("notify_path"):
+            return
+        first = (m.get("name") or m["callsign"]).split()[0]
+        link = (f"\nEverything in one page: {g['welcome_url']}\n"
+                if g.get("welcome_url") else "")
+        body = (f"Hi {first},\n\n"
+                f"{m['callsign']} is approved on the N4SFL mesh gateway. Send the gateway "
+                "a direct message from your MeshCore radio (try ?) to get its menu:\n"
+                "weather, band activity, repeaters, directions, an offline AI helper, "
+                "and the BBS (mail and bulletins that reach hams nationwide).\n\n"
+                "Tips: send M for more of a long answer, BYE to go back to the menu. "
+                "Replies can take a minute across several hops, so one command at a "
+                f"time.\n{link}\n73,\nN4SFL\n")
+        try:
+            if g["notify_path"] not in sys.path:
+                sys.path.insert(0, g["notify_path"])
+            from notify_hub.config import load_config as hub_config
+            from notify_hub.channels import _email_to
+            _email_to(hub_config(), to, "Welcome to the N4SFL mesh gateway", body)
+            m["welcome_emailed"] = datetime.now().isoformat(timespec="seconds")
+            log.info("welcome email sent to %s for %s", to, m["callsign"])
+        except Exception:
+            log.exception("welcome email to %s failed", to)
 
     async def send_notice(self, kp: str) -> None:
         """Deliver the approval/denial DM; keep it queued until the radio acks."""

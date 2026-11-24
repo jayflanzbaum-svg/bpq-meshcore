@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Welcome to the N4SFL Mesh Gateway</title>
+<style>
+:root{--bg:#fff;--fg:#1d2330;--mut:#5a6275;--acc:#0b5cad;--box:#f0f4f9}
+@media (prefers-color-scheme:dark){:root{--bg:#14171d;--fg:#e6e9ef;--mut:#9aa3b5;--acc:#6db3f2;--box:#1e2330}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,sans-serif}
+main{max-width:40rem;margin:0 auto;padding:1.5rem 16px 3rem}
+h1{font-size:1.6rem;margin:.2rem 0}h2{font-size:1.15rem;margin-top:1.8rem;color:var(--acc)}
+p.sub{color:var(--mut);margin-top:0}
+code{background:var(--box);padding:.1em .4em;border-radius:4px}
+.box{background:var(--box);border-radius:8px;padding:.8rem 1rem;margin:.8rem 0}
+li{margin:.3rem 0}
+</style></head><body><main>
+<h1>Welcome to the N4SFL Mesh Gateway</h1>
+<p class="sub">Ham radio services over MeshCore, run from South Florida.</p>
+
+<h2>What this is</h2>
+<p>A gateway radio ("N4SFL-8 Mesh Gateway") connects the MeshCore mesh to a ham radio packet node.
+From any MeshCore radio you can send it a direct message and get weather, band activity,
+repeater lookups, directions and an offline AI helper. Approved hams can also use the
+BBS (mail and bulletins that reach hams nationwide, plus Winlink email).</p>
+
+<h2>Getting started</h2>
+<ol>
+<li>Add the gateway as a contact (it adverts itself every few hours) and send it a
+<strong>direct message</strong>. Anything works, for example <code>?</code>.</li>
+<li>It answers with a menu, such as <code>WX | SPOTS | RPTSRCH | DIRECTIONS | OFFGRIDAI</code>.
+Send a command name to open that service.</li>
+<li>Long answers come in parts. Send <code>M</code> for more.</li>
+<li>Send <code>BYE</code> to leave a service and return to the menu.</li>
+</ol>
+
+<h2>What you can send</h2>
+<div class="box">
+<code>?</code> menu &nbsp; <code>M</code> more &nbsp; <code>BYE</code> log off<br>
+<code>WX</code> weather &nbsp; <code>SPOTS</code> band activity &nbsp; <code>RPTSRCH</code> repeaters<br>
+<code>DIRECTIONS</code> driving directions &nbsp; <code>OFFGRIDAI</code> offline AI helper<br>
+<code>BBS</code> mail and bulletins (approved hams)
+</div>
+
+<h2>Access levels</h2>
+<ul>
+<li><strong>Guest:</strong> everyone. Weather, band activity, repeaters, directions, offline AI.</li>
+<li><strong>Approved ham:</strong> send <code>MYCALL &lt;your callsign&gt;</code>. The gateway asks your
+name, city and state and an optional email, the sysop checks your license, and you get a message
+back when you are approved. You can turn your radio off after you send your answers; the
+reply is retried until your radio is back on the air.</li>
+</ul>
+
+<h2>Good habits</h2>
+<ul>
+<li>Mesh airtime is shared. Keep messages short and don't repeat a command if the answer is slow;
+replies can take a minute across several hops.</li>
+<li>Use a direct message, not a public channel, to talk to the gateway.</li>
+<li>If you hear nothing, check that your radio has a path to a repeater and try again later.</li>
+</ul>
+
+<p class="sub">73, N4SFL</p>
+</main></body></html>
