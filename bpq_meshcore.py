@@ -73,7 +73,7 @@ DEFAULT_CONFIG = {
     # message arrived, and the radio's own suggested wait (x3 tries) held each
     # part of a reply for 20-35 s.
     "paging": {"chunk_chars": 118, "chunks_per_reply": 4, "gap_s": 2.5,
-               "ack_wait_s": 8, "dm_attempts": 3,
+               "ack_wait_s": 8, "dm_attempts": 3, "part_rounds": 2,
                "max_pages": 5},
     "adverts": {"flood_every_h": 12},
     # Local web page for managing the radio (the bridge holds the USB port,
@@ -670,10 +670,18 @@ class Bridge:
                                     name="(bridge)", via="bridge")
             else:
                 p = self.cfg["paging"]
-                r = await self.mc.commands.send_msg_with_retry(
-                    dest, text, max_attempts=p["dm_attempts"], flood_after=1,
-                    timeout=p["ack_wait_s"])
-                acked = not (r is None or r.type == EventType.ERROR)
+                # A part that is never acknowledged is a hole in the reply
+                # (users saw 1/3 then 3/3), so keep trying before giving up.
+                acked = False
+                for rnd in range(max(1, int(p.get("part_rounds", 2)))):
+                    r = await self.mc.commands.send_msg_with_retry(
+                        dest, text, max_attempts=p["dm_attempts"], flood_after=1,
+                        timeout=p["ack_wait_s"])
+                    acked = not (r is None or r.type == EventType.ERROR)
+                    if acked:
+                        break
+                    log.warning("DM to %s not acknowledged (round %d): %r",
+                                dest, rnd + 1, text[:40])
                 if not acked:
                     log.error("DM to %s not acknowledged: %r", dest, text[:40])
                 if self.web:
@@ -686,18 +694,28 @@ class Bridge:
     async def page_out(self, st: UserState) -> None:
         p = self.cfg["paging"]
         n = p["chunks_per_reply"]
-        batch, st.pending = st.pending[:n], st.pending[n:]
-        batch = number_parts(batch)       # ... (1/3) counts this page only
+        raw, st.pending = st.pending[:n], st.pending[n:]
+        batch = number_parts(raw)         # ... (1/3) counts this page only
         for i, c in enumerate(batch):
             if i == len(batch) - 1 and st.pending:
                 pages = -(-len(st.pending) // n)  # one page = one M reply
                 tag = f"\n[M=More, {pages} page{'s' if pages != 1 else ''} left]"
                 if len((c + tag).encode()) > MSG_MAX:
-                    await self.say(c, st.dest)
+                    if not await self.say(c, st.dest):
+                        self.hold_unsent(st, raw[i:])
+                        return
                     c = tag.strip()
                 else:
                     c += tag
-            await self.say(c, st.dest)
+            if not await self.say(c, st.dest):
+                # Do not send later parts past a hole: keep this one and the
+                # rest, and let the user ask for them again with M.
+                self.hold_unsent(st, raw[i:])
+                return
+
+    def hold_unsent(self, st: UserState, rest: List[str]) -> None:
+        log.error("link to %s failed: %d part(s) held for M", st.dest, len(rest))
+        st.pending = rest + st.pending
 
     def cap(self, name: str, st: UserState, new: List[str]) -> List[str]:
         """Keep one command's output within paging.max_pages pages."""
@@ -854,7 +872,8 @@ class Bridge:
         # left only for the " (1/2)" marker.
         ok = True
         for c in number_parts(chunk_text(text, MSG_MAX - 8)):
-            ok = await self.say(c, dest) and ok
+            if not await self.say(c, dest):
+                return False             # never send later parts past a hole
         return ok
 
     def member(self, kp: str) -> Optional[Dict]:
