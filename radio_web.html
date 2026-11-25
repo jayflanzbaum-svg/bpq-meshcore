@@ -496,9 +496,9 @@ pre.out { margin: 8px 16px 0; background: var(--bg); border: 1px solid var(--lin
 .pktcard { position: absolute; z-index: 500; left: 50%; transform: translateX(-50%); bottom: 78px; width: min(460px, calc(100% - 20px));
   background: color-mix(in oklab, var(--surface) 88%, transparent); backdrop-filter: blur(6px); border-radius: 12px;
   padding: 8px 12px; box-shadow: var(--shadow); font-size: 12px; pointer-events: none; transition: opacity .4s; }
-.pktcard .r1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.pktcard .r1 { font-weight: 600; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; }
 .pktcard .r2 { color: var(--muted-foreground); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pktcard .badge { display: inline-block; border-radius: 6px; padding: 1px 7px; margin-right: 6px; color: #fff; font-weight: 700; font-size: 11px; }
+.pktcard .pkbadge { display: inline-block; border-radius: 6px; padding: 1px 7px; margin-right: 6px; color: #fff; font-weight: 700; font-size: 11px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
 .fab { position: absolute; right: 18px; bottom: 18px; width: 54px; height: 54px; border-radius: 16px; border: 0;
   background: var(--accent); cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,.25); display: grid; place-items: center; }
@@ -1119,7 +1119,7 @@ function showCard(p, color) {                  // like the official app: type, r
   const c = $("#pktCard"); if (!c) return;
   const names = (p.pts || []).map(q => q[2]).filter(Boolean), t = TYPE_STYLE[pktType(p)] || TYPE_STYLE.oth;
   const heard = names.length > 1 ? names[names.length - 2] : (names[0] || "");
-  c.innerHTML = `<div class="r1"><span class="badge" style="background:${color}">${esc(t[0])}</span>${esc(names.join(" → ") || "(path unknown)")}</div>` +
+  c.innerHTML = `<div class="r1"><span class="pkbadge" style="background:${color}">${esc(t[0])}</span>${esc(names.join(" → ") || "(path unknown)")}</div>` +
     `<div class="r2">${heard ? "Heard from " + esc(heard) + " · " : ""}${esc(p.route || "?")}${p.hops != null ? " " + esc(p.hops) : ""}${p.snr != null ? " · SNR " + esc(p.snr) : ""}</div>`;
   c.hidden = false; c.style.opacity = 1;
   clearTimeout(cardTimer); cardTimer = setTimeout(() => { c.style.opacity = 0; setTimeout(() => { if (c.style.opacity === "0") c.hidden = true; }, 400); }, 6000);
@@ -1174,7 +1174,7 @@ function liveTick(now) {
       if (e1 <= e0) { seg.setStyle({opacity: 0}); continue; }
       seg.setLatLngs([posAt(a, e0), posAt(a, e1)]);
       const q = 1 - k / TAIL_N;                  // smooth falloff: bright and fat at the head, a thin wisp at the end
-      seg.setStyle({opacity: Math.min(1, .15 + .85 * q * q) * fadeOut, weight: 1.5 + 5 * q});
+      seg.setStyle({opacity: Math.min(1, .15 + .85 * q * q) * fadeOut, weight: 1 + 2.8 * q});
     }
     const hp = posAt(a, headD);
     if (run <= a.total) {
