@@ -19,6 +19,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import time
 from collections import deque
 from pathlib import Path
@@ -743,6 +744,25 @@ class RadioWeb:
         if r is None:
             raise ApiError(504, "no answer from that node")
         return {"status": r.payload if hasattr(r, "payload") else r}
+
+    async def post_trace(self, a) -> Dict:
+        """Trace through repeaters: path is comma-separated hex hashes of the same
+        size ("b98b" or "b98b,1d0b"). The result lists SNR (dB) at each hop and at
+        this radio, i.e. out and back, which is what a trace route shows."""
+        path = str(a.get("path") or "").replace(" ", "").lower()
+        if not path:
+            raise ApiError(400, "no path")
+        tag = random.randint(1, 0xFFFFFFFF)
+
+        async def go(mc):
+            r = await mc.commands.send_trace(auth_code=0, tag=tag, path=path)
+            _ok(r)
+            wait = min(30, max(5, (r.payload.get("suggested_timeout") or 8000) / 1000 * 1.5))
+            return await mc.wait_for_event(EventType.TRACE_DATA, attribute_filters={"tag": tag}, timeout=wait)
+        r = await self._cmd(go, 45)
+        if r is None:
+            raise ApiError(504, "trace sent, no answer")
+        return {"trace": r.payload}
 
     async def post_repeater_cmd(self, a) -> Dict:
         c = self._contact(a.get("key"))
