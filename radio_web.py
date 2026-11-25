@@ -196,7 +196,7 @@ class RadioWeb:
         typ = str(p.get("payload_typename") or "")
         pl = p.get("pkt_payload") or b""
         d = {"t": e["t"], "typ": typ, "route": e.get("route"), "path": e["path"],
-             "phs": e["phs"], "snr": e.get("snr")}
+             "phs": e["phs"], "snr": e.get("snr"), "hops": e.get("hops")}
         if typ == "GRP_TXT":
             d["chan"] = p.get("chan_name") or ""
             d["chash"] = p.get("chan_hash") or ""

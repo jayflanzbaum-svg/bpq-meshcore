@@ -493,6 +493,12 @@ pre.out { margin: 8px 16px 0; background: var(--bg); border: 1px solid var(--lin
 .leaflet-popup-content .pbtns { display: flex; gap: 6px; margin-top: 6px; }
 .leaflet-popup-content .pbtns button { border: 1px solid #ccc; background: #fff; border-radius: 12px; padding: 3px 10px; cursor: pointer; font: inherit; }
 .leaflet-popup-content .place { color: #666; }
+.pktcard { position: absolute; z-index: 500; left: 50%; transform: translateX(-50%); bottom: 78px; width: min(460px, calc(100% - 20px));
+  background: color-mix(in oklab, var(--surface) 88%, transparent); backdrop-filter: blur(6px); border-radius: 12px;
+  padding: 8px 12px; box-shadow: var(--shadow); font-size: 12px; pointer-events: none; transition: opacity .4s; }
+.pktcard .r1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.pktcard .r2 { color: var(--muted-foreground); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pktcard .badge { display: inline-block; border-radius: 6px; padding: 1px 7px; margin-right: 6px; color: #fff; font-weight: 700; font-size: 11px; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
 .fab { position: absolute; right: 18px; bottom: 18px; width: 54px; height: 54px; border-radius: 16px; border: 0;
   background: var(--accent); cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,.25); display: grid; place-items: center; }
@@ -590,6 +596,7 @@ pre.out { margin: 8px 16px 0; background: var(--bg); border: 1px solid var(--lin
     <div class="mapbar" id="liveChips" style="top:46px"></div>
     <div class="legend" id="pktLegend" style="bottom:44px"></div>
     <div class="mapnote" id="mapNote" hidden></div>
+    <div class="pktcard" id="pktCard" hidden></div>
     <div class="legend"><span><i style="background:var(--t-companion)"></i>Companion</span><span><i style="background:var(--t-repeater)"></i>Repeater</span>
       <span><i style="background:var(--t-room)"></i>Room</span><span><i style="background:var(--t-sensor)"></i>Sensor</span><span><i style="background:#e5534b"></i>This radio</span></div>
   </section>
@@ -1107,9 +1114,20 @@ $("#liveChips").onclick = e => {
 function clearAnims() { for (const a of anims) removeAnim(a); anims = []; }
 function removeAnim(a) { a.head && a.head.remove(); a.glow && a.glow.remove(); (a.tail || []).forEach(t => t.remove()); }
 const TAIL_N = 12;
+let cardTimer = 0;
+function showCard(p, color) {                  // like the official app: type, route names, who we heard it from
+  const c = $("#pktCard"); if (!c) return;
+  const names = (p.pts || []).map(q => q[2]).filter(Boolean), t = TYPE_STYLE[pktType(p)] || TYPE_STYLE.oth;
+  const heard = names.length > 1 ? names[names.length - 2] : (names[0] || "");
+  c.innerHTML = `<div class="r1"><span class="badge" style="background:${color}">${esc(t[0])}</span>${esc(names.join(" → ") || "(path unknown)")}</div>` +
+    `<div class="r2">${heard ? "Heard from " + esc(heard) + " · " : ""}${esc(p.route || "?")}${p.hops != null ? " " + esc(p.hops) : ""}${p.snr != null ? " · SNR " + esc(p.snr) : ""}</div>`;
+  c.hidden = false; c.style.opacity = 1;
+  clearTimeout(cardTimer); cardTimer = setTimeout(() => { c.style.opacity = 0; setTimeout(() => { if (c.style.opacity === "0") c.hidden = true; }, 400); }, 6000);
+}
 function addAnim(p, delay) {
   const color = (TYPE_STYLE[pktType(p)] || TYPE_STYLE.oth)[1], pts = p.pts.map(q => [q[0], q[1]]);
   if (!pts.length) return;
+  setTimeout(() => showCard(p, color), delay);
   const cum = [0];
   for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], (pts[i][1] - pts[i - 1][1]) * Math.cos(pts[i][0] * Math.PI / 180)));
   const total = cum[cum.length - 1];
