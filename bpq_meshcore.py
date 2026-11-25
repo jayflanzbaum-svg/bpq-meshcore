@@ -714,7 +714,15 @@ class Bridge:
                     acked = not (r is None or r.type == EventType.ERROR)
                     if acked:
                         log.info("DM to %s acknowledged (round %d): %r", dest, rnd + 1, text[:30])
-                        self.noack.pop(dest, None)
+                        # An occasional ACK must not end blind mode (it did: one
+                        # lucky ACK reset the count, the next part failed twice
+                        # and the rest of the reply was held). Each ACK only
+                        # takes one miss off the count.
+                        n = self.noack.get(dest, 0) - 1
+                        if n > 0:
+                            self.noack[dest] = n
+                        else:
+                            self.noack.pop(dest, None)
                         break
                     log.warning("DM to %s not acknowledged (round %d): %r",
                                 dest, rnd + 1, text[:40])
