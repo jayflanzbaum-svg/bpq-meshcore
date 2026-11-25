@@ -107,6 +107,7 @@
   --shadow-pop: 0 0.5rem 1.75rem rgba(0, 0, 0, .5);
   --scrim: rgba(5, 10, 20, .6);
   --pill-b: 45%; --pill-up-bg: 0%; --pill-live-bg: 8%;   /* pill border / tint strength */
+  --map-filter: sepia(1) hue-rotate(172deg) saturate(1.7) brightness(.9);   /* tints Esri gray map tiles navy */
 }
 
 /* LIGHT (SFLDIGI values) */
@@ -134,7 +135,164 @@
   --shadow-pop: 0 0.5rem 1.75rem rgba(30, 40, 70, .18);
   --scrim: rgba(30, 40, 70, .35);
   --pill-b: 55%; --pill-up-bg: 7%; --pill-live-bg: 10%;
+  --map-filter: sepia(.45) hue-rotate(176deg) saturate(1.15) brightness(1.02);
 }
+</style>
+<style>
+/* ham-components.css */
+/* Ham-Design components. Every class is prefixed "ham-" so this file can be dropped into an
+   app that already has its own CSS without collisions. Needs ham-tokens.css.
+   Apps that only want the colors + fonts can skip this file and use an adapter instead. */
+
+.ham-page {
+  margin: 0; background-color: var(--background); background-image: var(--gradient-page);
+  background-attachment: fixed; color: var(--foreground);
+  font: var(--w) 0.875rem/1.5 var(--sans); -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums; min-height: 100vh;
+}
+.ham-page *, .ham-page *::before, .ham-page *::after { box-sizing: border-box; }
+.ham-mono { font-family: var(--mono); }
+
+/* header bar: title left, controls right */
+.ham-header { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border); padding-bottom: 0.75rem; margin-bottom: 0.875rem; }
+.ham-title { font: 700 1.25rem/1 var(--sans); margin: 0; }
+.ham-title small { font-weight: 500; color: var(--muted-foreground); font-size: .75rem; margin-left: 0.5rem; }
+.ham-title small::before { content: "/ "; }
+.ham-spacer { margin-left: auto; }
+
+/* PAGE HEADER (Jason's standard): icon tile on the left, big bold title, small sub text UNDER the
+   title; title + sub together are as tall as the icon. Optional round (i) info button after them.
+   <div class="ham-pagehead"><span class="ham-pagehead-icon">&#128225;</span>
+     <div class="ham-pagehead-text"><h1 class="ham-pagehead-title">N4SFL-8 BBS &amp; Winlink Gateway</h1>
+     <p class="ham-pagehead-sub">Log Analysis</p></div><button class="ham-info" title="About">i</button></div>
+   Add class "sm" for dense toolbars (2rem icon, smaller title). */
+.ham-pagehead { display: flex; align-items: center; gap: 0.75rem; min-width: 0; }
+.ham-pagehead-icon { flex: none; width: 2.75rem; height: 2.75rem; display: grid; place-items: center;
+  font-size: 1.4rem; line-height: 1; border-radius: 0.75rem; color: var(--cyan);
+  background: color-mix(in oklab, var(--cyan) 12%, transparent);
+  border: 1px solid color-mix(in oklab, var(--cyan) 30%, transparent); }
+.ham-pagehead-icon svg { width: 1.5rem; height: 1.5rem; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.ham-pagehead-text { display: flex; flex-direction: column; justify-content: center; min-width: 0; height: 2.75rem; }
+.ham-pagehead-title { margin: 0; font: 700 1.35rem/1.15 var(--sans); letter-spacing: 0;
+  color: var(--foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ham-pagehead-sub { margin: 0.1rem 0 0; font: 400 0.72rem/1.2 var(--sans); color: var(--muted-foreground);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ham-info { flex: none; width: 1.15rem; height: 1.15rem; border-radius: 50%; display: grid; place-items: center;
+  border: 1px solid var(--muted-foreground); background: transparent; color: var(--muted-foreground);
+  font: italic 600 0.65rem/1 var(--mono); cursor: pointer; padding: 0; }
+.ham-info:hover { color: var(--cyan); border-color: var(--cyan); }
+.ham-pagehead.sm { gap: 0.55rem; }
+.ham-pagehead.sm .ham-pagehead-icon { width: 2rem; height: 2rem; font-size: 1.05rem; border-radius: 0.55rem; }
+.ham-pagehead.sm .ham-pagehead-icon svg { width: 1.15rem; height: 1.15rem; }
+.ham-pagehead.sm .ham-pagehead-text { height: 2rem; }
+.ham-pagehead.sm .ham-pagehead-title { font-size: 0.98rem; line-height: 1.1; }
+.ham-pagehead.sm .ham-pagehead-sub { font-size: 0.62rem; margin-top: 0.05rem; }
+
+/* section label with a rule after it */
+.ham-section { font: 600 .65rem/1.2 var(--sans); color: var(--muted-foreground); text-transform: uppercase;
+  margin: 0.875rem 0 0.5rem; display: flex; align-items: center; }
+.ham-section::after { content: ""; height: 1px; flex: 1; background: var(--border); margin-left: 0.5rem; }
+
+/* panel: card + header strip. Header style = the SFLDIGI site (Jason's standard):
+   2px cyan top edge, flat header surface, cyan square marker, UPPERCASE title,
+   mono UPPERCASE label on the right.
+   <section class="ham-panel"><header class="ham-panel-head"><h2 class="ham-panel-title">N4SFL / Network</h2>
+   <span class="ham-panel-right">VHF - HF</span></header><div class="ham-panel-body">...</div></section> */
+.ham-panel { position: relative; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--card); box-shadow: var(--shadow-card); overflow: hidden; min-width: 0; }
+.ham-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  padding: 0.7rem 1rem; border-bottom: 1px solid var(--border);
+  border-top: 2px solid color-mix(in oklch, var(--cyan) 55%, transparent); background: var(--header-surface); }
+.ham-panel-title { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; display: flex;
+  align-items: center; gap: 0.4rem; margin: 0; font-family: var(--sans); color: var(--foreground); }
+.ham-panel-title::before { content: ""; width: 0.4rem; height: 0.4rem; background: var(--cyan); border-radius: 1px; flex: none; }
+.ham-panel-right { font-family: var(--mono); font-size: 0.65rem; color: var(--muted-foreground); text-transform: uppercase; }
+.ham-panel-body { padding: 1rem; display: grid; gap: 0.75rem; }
+.ham-panel-body.flush { padding: 0; gap: 0; }
+.ham-panel.is-up   { border-color: var(--signal); }
+.ham-panel.is-warn { border-color: color-mix(in oklab, var(--amber) 60%, var(--border)); }
+.ham-panel.is-down { border-color: color-mix(in oklab, var(--rose) 60%, var(--border)); }
+.ham-grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fit, minmax(16.25rem, 1fr)); }
+
+/* status pill: .ham-badge  +  up | live | warn | down | rx | tx */
+.ham-badge { display: inline-flex; align-items: center; gap: 0.3125rem; border: 1px solid var(--border);
+  border-radius: 62.4375rem; padding: 1px 0.5rem; font: 400 .6rem/1.5 var(--mono);
+  color: var(--muted-foreground); background: transparent; white-space: nowrap; }
+.ham-badge.up, .ham-badge.live, .ham-badge.tx { color: var(--signal); }
+.ham-badge.warn { color: var(--amber); }
+.ham-badge.down { color: var(--rose); }
+.ham-badge.rx { color: var(--cyan); }
+.ham-badge.up   { border-color: color-mix(in oklab, var(--signal) var(--pill-b), var(--border));
+                  background: color-mix(in oklab, var(--signal) var(--pill-up-bg), transparent); }
+.ham-badge.live, .ham-badge.tx { border-color: color-mix(in oklab, var(--signal) var(--pill-b), var(--border));
+                  background: color-mix(in oklab, var(--signal) var(--pill-live-bg), transparent); }
+.ham-badge.warn { border-color: color-mix(in oklab, var(--amber) var(--pill-b), var(--border));
+                  background: color-mix(in oklab, var(--amber) var(--pill-live-bg), transparent); }
+.ham-badge.down { border-color: color-mix(in oklab, var(--rose) var(--pill-b), var(--border));
+                  background: color-mix(in oklab, var(--rose) var(--pill-live-bg), transparent); }
+.ham-badge.rx   { border-color: color-mix(in oklab, var(--cyan) var(--pill-b), var(--border));
+                  background: color-mix(in oklab, var(--cyan) var(--pill-live-bg), transparent); }
+.ham-badge.live::before { content: ""; width: 0.375rem; height: 0.375rem; border-radius: 62.4375rem; background: var(--signal); }
+
+/* buttons */
+.ham-btn { border: 1px solid var(--border); border-radius: var(--radius);
+  background: color-mix(in oklab, var(--secondary) 70%, transparent); color: var(--foreground);
+  font: 500 .7rem var(--sans); padding: 0.3125rem 0.625rem; cursor: pointer; }
+.ham-btn:hover { border-color: var(--cyan); }
+.ham-btn.primary { border-color: var(--cyan); color: var(--cyan); background: transparent; }
+
+/* inputs */
+.ham-input { background: var(--lcd); color: var(--lcd-text); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 0.3125rem 0.5rem; font: .75rem var(--mono); }
+.ham-input:focus { outline: none; border-color: var(--cyan); }
+
+/* log well (monospace inset) */
+.ham-feed { min-height: 8rem; overflow: auto; font: .72rem/1.5 var(--mono); padding: 0.375rem 0.5rem;
+  background: var(--lcd); color: var(--lcd-text); border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 0.125rem); }
+.ham-feed .t { margin-right: 0.5rem; color: var(--muted-foreground); }
+.ham-feed .warn, .ham-feed .err { color: var(--amber); }
+.ham-feed .cs { color: var(--cyan); font-weight: 600; }
+.ham-feed .cs2 { color: var(--signal); font-weight: 600; }
+
+/* key / value row and big frequency readout */
+.ham-kv { display: flex; justify-content: space-between; align-items: baseline; font-size: .65rem; color: var(--muted-foreground); gap: 0.625rem; }
+.ham-kv b { font: 700 .7rem var(--mono); color: var(--foreground); text-align: right; white-space: nowrap; }
+.ham-kv b.callsign { color: var(--cyan); }
+.ham-readout { font: 600 1.4rem/1.1 var(--mono); color: var(--cyan); }
+
+/* tables: UPPERCASE mono headers, striped rows */
+.ham-table { width: 100%; border-collapse: collapse; font: .62rem var(--mono); text-align: left; }
+.ham-table th { color: var(--muted-foreground); font: 500 .58rem var(--mono); text-transform: uppercase; padding: 0.3125rem 0.5rem; white-space: nowrap; }
+.ham-table td { padding: 0.3125rem 0.5rem; border-top: 1px solid var(--border); color: var(--lcd-text); }
+.ham-table tbody tr:nth-child(even) { background: var(--table-row); }
+.ham-table tr.bad td { color: var(--rose); font-weight: 600; }
+
+/* toast + modal */
+.ham-toast { position: fixed; right: 0.875rem; bottom: 0.875rem; background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 0.5rem 0.75rem; font-size: .8rem; box-shadow: var(--shadow-pop); max-width: 26rem; }
+.ham-scrim { position: fixed; inset: 0; z-index: 50; background: var(--scrim); display: flex; align-items: center; justify-content: center; }
+.ham-modal { background: var(--card); border: 1px solid var(--signal); border-radius: var(--radius);
+  box-shadow: var(--shadow-pop); overflow: hidden; max-width: 94vw; max-height: 90vh; }
+</style>
+<style>
+/* ham-leaflet.css */
+/* Ham-Design: Leaflet maps in the N4SFL look. Needs ham-tokens.css. The Esri gray tiles are tinted
+   navy (dark) / pale blue (light) by --map-filter; controls, popups and attribution use the tokens. */
+.leaflet-container { background: var(--lcd); font-family: var(--sans); color: var(--foreground); }
+.leaflet-tile-pane, .leaflet-shadow-pane { filter: var(--map-filter); }
+.leaflet-bar { border: 1px solid var(--border) !important; box-shadow: var(--shadow-card) !important; border-radius: var(--radius) !important; overflow: hidden; }
+.leaflet-bar a, .leaflet-bar a:hover { background-color: var(--card); color: var(--foreground); border-bottom-color: var(--border); }
+.leaflet-bar a:hover { background-color: var(--secondary); color: var(--cyan); }
+.leaflet-bar a.leaflet-disabled { background-color: var(--card); color: var(--idle); }
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--card); color: var(--foreground); border: 1px solid var(--border); box-shadow: var(--shadow-pop); }
+.leaflet-popup-content-wrapper { border-radius: var(--radius); }
+.leaflet-popup-content { font-family: var(--sans); }
+.leaflet-container a.leaflet-popup-close-button { color: var(--muted-foreground); }
+.leaflet-container a { color: var(--cyan); }
+.leaflet-control-attribution { background: color-mix(in oklab, var(--card) 80%, transparent) !important; color: var(--muted-foreground) !important; font-family: var(--mono); font-size: .6rem; }
+.leaflet-tooltip { background: var(--card); color: var(--foreground); border: 1px solid var(--border); box-shadow: var(--shadow-card); font-family: var(--mono); }
 </style>
 <style>
 /* adapters/legacy-surface.css */
@@ -175,8 +333,8 @@ svg.i { width: 22px; height: 22px; fill: currentColor; flex: none; }
 .bar { background: var(--bar); color: var(--bar-text); display: flex; align-items: center; gap: 10px;
   padding: 8px 8px 8px 16px; min-height: 56px; position: relative; }
 .bar .ttl { flex: 1; min-width: 0; }
-.bar .ttl b { display: block; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bar .ttl small { color: var(--bar-muted); font-size: 12px; display: flex; align-items: center; gap: 6px; white-space: nowrap; overflow: hidden; }
+.bar .ttl b { display: block; }
+.bar .ttl small { color: var(--bar-muted); display: flex; align-items: center; gap: 6px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; background: var(--bar-muted); flex: none; }
 .icon-btn { background: none; border: 0; padding: 8px; border-radius: 50%; cursor: pointer; display: grid; place-items: center; color: inherit; }
 .icon-btn:hover { background: rgba(127,127,127,.18); }
@@ -367,7 +525,9 @@ pre.out { margin: 8px 16px 0; background: var(--bg); border: 1px solid var(--lin
 
 <header class="bar">
   <button class="icon-btn" id="backBtn" title="Back"><svg class="i"><use href="#i-back"/></svg></button>
-  <div class="ttl"><b id="title">Mesh Radio</b><small id="status"><span class="dot"></span>connecting…</small></div>
+  <div class="ham-pagehead ttl"><span class="ham-pagehead-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 21 12 8l4 13"/><path d="M9.4 16.5h5.2M10.7 12.6h2.6M6 21h12"/><circle cx="12" cy="6.6" r="1.1"/><path d="M8.6 4.6a4.6 4.6 0 0 0 0 4M5.8 2.8a8 8 0 0 0 0 7.6M15.4 4.6a4.6 4.6 0 0 1 0 4M18.2 2.8a8 8 0 0 1 0 7.6"/></svg></span>
+    <div class="ham-pagehead-text"><b id="title" class="ham-pagehead-title">N4SFL</b><small class="ham-pagehead-sub">MeshCore to BPQ Gateway</small></div></div>
+  <span id="status" class="ham-badge">connecting…</span>
   <button class="icon-btn" id="advBtn" title="Send zero-hop advert"><svg class="i"><use href="#i-advert"/></svg></button>
   <button class="icon-btn" id="menuBtn" title="More"><svg class="i"><use href="#i-more"/></svg></button>
   <div class="menu" id="menu">
@@ -540,7 +700,7 @@ function go(v) {
 }
 function setTitle() {
   const me = S.self || {}, inChat = view === "chats" && conv && !wide();
-  $("#title").textContent = {settings: "Settings", gateway: "Gateway"}[view] || (inChat ? convLabel(conv) : me.name || "Mesh Radio");
+  $("#title").textContent = {settings: "Settings", gateway: "Gateway"}[view] || (inChat ? convLabel(conv) : "N4SFL");
   $("#backBtn").style.display = view === "settings" || view === "gateway" || inChat ? "grid" : "none";
   document.title = (me.name || "Mesh Radio") + " · Mesh Radio";
 }
@@ -563,9 +723,10 @@ addEventListener("resize", setTitle);
 async function loadState() {
   try { S = await api("state"); } catch (e) { S = {connected: false, err: e.message}; }
   const me = S.self || {};
-  $("#status").innerHTML = S.connected
-    ? `<span class="dot" style="background:#4ade80"></span>Connected · ${esc(S.port)}${me.radio_freq ? ` · ${me.radio_freq} MHz · SF${me.radio_sf} · ${me.tx_power} dBm` : ""}`
-    : `<span class="dot" style="background:#f87171"></span>${esc(S.err || "Radio not connected")}`;
+  const st = $("#status");   // compact connection badge in the bar; the radio details are its tooltip
+  st.className = "ham-badge " + (S.connected ? "live" : "down");
+  st.textContent = S.connected ? "Connected" : (S.err || "Radio not connected");
+  st.title = S.connected ? `${S.port}${me.radio_freq ? ` · ${me.radio_freq} MHz · SF${me.radio_sf} · ${me.tx_power} dBm` : ""}` : "";
   setTitle(); renderTalk(); if (view === "gateway") renderGateway();
 }
 
