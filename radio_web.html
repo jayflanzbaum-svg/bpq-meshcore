@@ -889,13 +889,13 @@ function showMap() {
   const pts = [];
   for (const c of contacts) {
     if (!c.lat || !c.lon || (mapFilter && String(c.type_id) !== mapFilter)) continue;
-    const mk = L.circleMarker([c.lat, c.lon], {radius: 5.25, color: "#fff", weight: 1.5, fillColor: css((TYPES[c.type_id] || TYPES[1])[2]), fillOpacity: .95})
+    const mk = L.circleMarker([c.lat, c.lon], {radius: 4.2, color: "#fff", weight: 1.5, fillColor: css((TYPES[c.type_id] || TYPES[1])[2]), fillOpacity: .95})
       .bindPopup(popupHtml(c)).addTo(layer);
     mk.getPopup()._contact = c; markers[c.key] = mk;
     pts.push([c.lat, c.lon]);
   }
   const me = S.self || {};
-  if (me.adv_lat) { L.circleMarker([me.adv_lat, me.adv_lon], {radius: 7.5, color: "#fff", weight: 2.5, fillColor: "#e5534b", fillOpacity: 1})
+  if (me.adv_lat) { L.circleMarker([me.adv_lat, me.adv_lon], {radius: 6, color: "#fff", weight: 2.5, fillColor: "#e5534b", fillOpacity: 1})
     .bindPopup(`<b>${esc(me.name)}</b><br>This radio · position ${me.adv_loc_policy ? "shared in adverts" : "private"}<br><span class="place">…</span>`).addTo(layer).bringToFront();
     pts.push([me.adv_lat, me.adv_lon]); }
   mapNote();
