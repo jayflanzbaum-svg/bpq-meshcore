@@ -787,11 +787,13 @@ const TYPE_STYLE = {adv: ["ADV", "#f0509a"], dm: ["MSG", "#3b82f6"], gtx: ["GTX"
                     trc: ["TRC", "#f59e0b"], pth: ["PTH", "#a78bfa"], oth: ["OTH", "#9ca3af"]};
 const TYP_KIND = {ADVERT: "adv", TEXT_MSG: "dm", GRP_TXT: "gtx", ACK: "ack", TRACE: "trc", PATH: "pth"};
 function pktType(p) { return TYP_KIND[p.typ] || "oth"; }
-function pktKind(p) { const t = pktType(p); return t === "gtx" ? "ch:" + (p.chan || "?" + p.chash) : t; }
+// A channel this radio has no key for can only be told apart by a 1-byte hash,
+// which made dozens of "channels": they are all grouped as one.
+function pktKind(p) { const t = pktType(p); return t === "gtx" ? "ch:" + (p.chan || "?") : t; }
 function kindLabel(k) {
   const fixed = {adv: "Adverts", dm: "Direct messages", ack: "ACKs", trc: "Traces", pth: "Paths", oth: "Other"};
   if (fixed[k]) return fixed[k];
-  return k.slice(3).startsWith("?") ? "Unknown channel " + k.slice(4) : k.slice(3);
+  return k === "ch:?" ? "Other channels (no key)" : k.slice(3);
 }
 function kindDot(k) { return (TYPE_STYLE[k.startsWith("ch:") ? "gtx" : k] || TYPE_STYLE.oth)[1]; }
 function renderLiveChips() {
