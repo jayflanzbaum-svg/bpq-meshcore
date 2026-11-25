@@ -693,9 +693,15 @@ class Bridge:
                 # A part that is never acknowledged is a hole in the reply
                 # (users saw 1/3 then 3/3), so keep trying before giving up.
                 acked = False
+                # One timestamp for every round of this part: a new timestamp
+                # makes a new message, so when only the ACK was lost the user
+                # got the same part twice. Same timestamp = the receiver
+                # recognises a repeat.
+                part_ts = int(time.time())
                 for rnd in range(max(1, int(p.get("part_rounds", 2)))):
                     r = await self.mc.commands.send_msg_with_retry(
-                        dest, text, max_attempts=p["dm_attempts"], flood_after=1,
+                        dest, text, timestamp=part_ts,
+                        max_attempts=p["dm_attempts"], flood_after=1,
                         timeout=p["ack_wait_s"])
                     acked = not (r is None or r.type == EventType.ERROR)
                     if acked:
