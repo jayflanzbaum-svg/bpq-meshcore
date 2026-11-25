@@ -73,7 +73,7 @@ DEFAULT_CONFIG = {
     # message arrived, and the radio's own suggested wait (x3 tries) held each
     # part of a reply for 20-35 s.
     "paging": {"chunk_chars": 118, "chunks_per_reply": 4, "gap_s": 2.5,
-               "ack_wait_s": 8, "dm_attempts": 3, "part_rounds": 2,
+               "ack_wait_s": 8, "dm_attempts": 3, "part_rounds": 2, "blind_after": 4,
                "max_pages": 5},
     "adverts": {"flood_every_h": 12},
     # Local web page for managing the radio (the bridge holds the USB port,
@@ -665,6 +665,7 @@ class Bridge:
         self.seen_dm = {}                  # (key, sender time, text) -> when seen
         self.greeted = set()               # guests already given the welcome
         self.signups = {}                  # radio key -> signup questions in progress
+        self.noack = {}                    # radio key -> consecutive un-ACKed parts
         self.dest_locks = {}               # radio key -> lock: one whole reply at a time
         self.by_key = {}
         for name, u in cfg["users"].items():
@@ -698,19 +699,33 @@ class Bridge:
                 # got the same part twice. Same timestamp = the receiver
                 # recognises a repeat.
                 part_ts = int(time.time())
-                for rnd in range(max(1, int(p.get("part_rounds", 2)))):
+                # A radio whose ACKs never come back (weak return link: K1HRS
+                # answers every menu, so he gets our parts) made each part take
+                # ~40 s and the rest of the reply get held. After `blind_after`
+                # misses in a row send once, treat it as delivered, and keep
+                # watching: the first real ACK ends this.
+                blind = self.noack.get(dest, 0) >= int(p.get("blind_after", 4))
+                rounds = 1 if blind else max(1, int(p.get("part_rounds", 2)))
+                for rnd in range(rounds):
                     r = await self.mc.commands.send_msg_with_retry(
                         dest, text, timestamp=part_ts,
-                        max_attempts=p["dm_attempts"], flood_after=1,
+                        max_attempts=2 if blind else p["dm_attempts"], flood_after=1,
                         timeout=p["ack_wait_s"])
                     acked = not (r is None or r.type == EventType.ERROR)
                     if acked:
                         log.info("DM to %s acknowledged (round %d): %r", dest, rnd + 1, text[:30])
+                        self.noack.pop(dest, None)
                         break
                     log.warning("DM to %s not acknowledged (round %d): %r",
                                 dest, rnd + 1, text[:40])
                 if not acked:
-                    log.error("DM to %s not acknowledged: %r", dest, text[:40])
+                    self.noack[dest] = self.noack.get(dest, 0) + 1
+                    if blind:
+                        log.warning("DM to %s: no ACK from this radio for %d parts; "
+                                    "sent once and counted as delivered", dest, self.noack[dest])
+                        acked = True
+                    else:
+                        log.error("DM to %s not acknowledged: %r", dest, text[:40])
                 if self.web:
                     self.web.record("out", "dm", text, peer=dest,
                                     name=self.web.contact_name(dest), via="bridge",
