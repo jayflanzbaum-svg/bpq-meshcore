@@ -1112,8 +1112,8 @@ $("#liveChips").onclick = e => {
   renderLiveChips();
 };
 function clearAnims() { for (const a of anims) removeAnim(a); anims = []; }
-function removeAnim(a) { a.head && a.head.remove(); a.glow && a.glow.remove(); (a.tail || []).forEach(t => t.remove()); }
-const TAIL_N = 12;
+function removeAnim(a) { a.head && a.head.remove(); a.glow && a.glow.remove(); (a.tail || []).forEach(t => t.remove()); (a.rip || []).forEach(r => r.m.remove()); }
+const TAIL_N = 24;
 let cardTimer = 0;
 function showCard(p, color) {                  // like the official app: type, route names, who we heard it from
   const c = $("#pktCard"); if (!c) return;
@@ -1132,7 +1132,7 @@ function addAnim(p, delay) {
   for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], (pts[i][1] - pts[i - 1][1]) * Math.cos(pts[i][0] * Math.PI / 180)));
   const total = cum[cum.length - 1];
   // About 900 ms per hop, so a long way takes longer; the tail is a third of the way.
-  anims.push({pts, cum, total, color, start: performance.now() + delay, ms: Math.max(pts.length - 1, 1) * 900, tailLen: total / 3, head: null, glow: null, tail: []});
+  anims.push({pts, cum, total, color, start: performance.now() + delay, ms: Math.max(pts.length - 1, 1) * 900, tailLen: total / 3, head: null, glow: null, tail: [], rip: [], hit: 0});
   if (!liveRaf) liveRaf = requestAnimationFrame(liveTick);
 }
 function posAt(a, d) {                       // point at distance d along the path (clamped)
@@ -1154,7 +1154,18 @@ function liveTick(now) {
     // The head runs source to target; once it is there the tail keeps going
     // until it has all been swallowed, like a torpedo running out of wake.
     const run = el / a.ms * a.total, headD = Math.min(run, a.total), tailEnd = run - a.tailLen;
-    if (tailEnd >= a.total) { removeAnim(a); return false; }
+    // Ripple on every node the head reaches (like the official app): rings that widen and fade.
+    while (a.hit < a.pts.length - 1 && run >= a.cum[a.hit + 1]) {
+      a.hit++;
+      for (let k = 0; k < 2; k++) a.rip.push({k, t0: now + k * 260, m: L.circleMarker(a.pts[a.hit], {radius: 3, color: a.color, weight: 2.5, fill: false, opacity: 0, interactive: false}).addTo(liveLayer)});
+    }
+    let ripLive = false;
+    a.rip = a.rip.filter(r => {
+      const f = (now - r.t0) / 1300; if (f < 0) { ripLive = true; return true; }
+      if (f >= 1) { r.m.remove(); return false; }
+      r.m.setRadius(4 + 26 * f); r.m.setStyle({opacity: .9 * (1 - f) * (1 - f), weight: 3 - 2 * f}); ripLive = true; return true;
+    });
+    if (tailEnd >= a.total && !ripLive) { removeAnim(a); return false; }
     const fadeOut = run > a.total ? Math.max(0, 1 - (run - a.total) / a.tailLen) : 1;
     if (!a.tail.length) for (let k = 0; k < TAIL_N; k++) a.tail.push(L.polyline([a.pts[0], a.pts[0]], {color: a.color, weight: 4, opacity: 0, lineCap: "round", interactive: false}).addTo(liveLayer));
     for (let k = 0; k < TAIL_N; k++) {                        // k = 0 is next to the head, brightest
@@ -1162,7 +1173,8 @@ function liveTick(now) {
       const e1 = Math.min(d1, a.total), e0 = Math.max(d0, 0);
       if (e1 <= e0) { seg.setStyle({opacity: 0}); continue; }
       seg.setLatLngs([posAt(a, e0), posAt(a, e1)]);
-      seg.setStyle({opacity: .95 * (1 - k / TAIL_N), weight: 5 - 3 * k / TAIL_N});
+      const q = 1 - k / TAIL_N;                  // smooth falloff: bright and fat at the head, a thin wisp at the end
+      seg.setStyle({opacity: Math.min(1, .15 + .85 * q * q) * fadeOut, weight: 1.5 + 5 * q});
     }
     const hp = posAt(a, headD);
     if (run <= a.total) {
