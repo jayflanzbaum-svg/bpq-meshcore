@@ -665,6 +665,7 @@ class Bridge:
         self.seen_dm = {}                  # (key, sender time, text) -> when seen
         self.greeted = set()               # guests already given the welcome
         self.signups = {}                  # radio key -> signup questions in progress
+        self.dest_locks = {}               # radio key -> lock: one whole reply at a time
         self.by_key = {}
         for name, u in cfg["users"].items():
             kp = key_prefix(u.get("pubkey", ""))
@@ -698,6 +699,7 @@ class Bridge:
                         timeout=p["ack_wait_s"])
                     acked = not (r is None or r.type == EventType.ERROR)
                     if acked:
+                        log.info("DM to %s acknowledged (round %d): %r", dest, rnd + 1, text[:30])
                         break
                     log.warning("DM to %s not acknowledged (round %d): %r",
                                 dest, rnd + 1, text[:40])
@@ -710,7 +712,16 @@ class Bridge:
             await asyncio.sleep(self.cfg["paging"]["gap_s"])
         return acked
 
+    def dest_lock(self, dest: Optional[str]) -> asyncio.Lock:
+        """Parts of two replies to one radio must not interleave (they showed up
+        as 1/4, then 1/2, then 2/4): each whole reply holds this lock."""
+        return self.dest_locks.setdefault(dest or "channel", asyncio.Lock())
+
     async def page_out(self, st: UserState) -> None:
+        async with self.dest_lock(st.dest):
+            await self._page_out(st)
+
+    async def _page_out(self, st: UserState) -> None:
         p = self.cfg["paging"]
         n = p["chunks_per_reply"]
         raw, st.pending = st.pending[:n], st.pending[n:]
@@ -889,11 +900,11 @@ class Bridge:
         True when every part was acknowledged."""
         # Not paged (no M=More note), so a message can be nearly full: room is
         # left only for the " (1/2)" marker.
-        ok = True
-        for c in number_parts(chunk_text(text, MSG_MAX - 8)):
-            if not await self.say(c, dest):
-                return False             # never send later parts past a hole
-        return ok
+        async with self.dest_lock(dest):
+            for c in number_parts(chunk_text(text, MSG_MAX - 8)):
+                if not await self.say(c, dest):
+                    return False         # never send later parts past a hole
+        return True
 
     def member(self, kp: str) -> Optional[Dict]:
         m = self.members.get(kp)
@@ -928,7 +939,9 @@ class Bridge:
     async def dispatch_guest(self, kp: str, body: str) -> None:
         m = self.member(kp)
         name = m["callsign"] if m else f"GUEST{kp[:6].upper()}"
-        log.info("[%s] <- %r via %s (guest)", name, body, kp)
+        # The dashboard reads a "(guest)" ending as "this is a guest", so an
+        # approved member's line must not carry it.
+        log.info("[%s] <- %r via %s%s", name, body, kp, "" if m else " (guest)")
         st = self.users.setdefault("dm:" + kp, UserState())
         try:
             async with st.lock:
