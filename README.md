@@ -272,6 +272,12 @@ It follows the official app's layout: Chats, Contacts, Channels and Map along
 the bottom, Settings and Gateway in the menu, and it fits a phone-width window
 as well as a desktop one (chats list and conversation side by side).
 
+![Live map: a packet's path across the repeaters, with the caption card](docs/img/map-live-packet.png)
+
+| Contacts | Channels |
+|---|---|
+| ![Contacts](docs/img/contacts.png) | ![Channels](docs/img/channels.png) |
+
 - **Chats:** one conversation per contact and channel, newest first, with
   unread counts. Messages show SNR, hops and delivery ticks; the gateway's own
   replies are marked. "Hide gateway sessions" leaves only other traffic.
@@ -281,7 +287,10 @@ as well as a desktop one (chats list and conversation side by side).
   and room servers also get remote admin: log in, status, CLI commands.
 - **Channels:** open a channel's chat, add, rename, rekey or remove one. The
   bridge's own slot asks for confirmation first.
-- **Map:** every contact that shares a position, coloured by type.
+- **Map:** every contact that shares a position, coloured by type. With
+  "Live" on, each packet the radio hears is drawn as a comet along its path,
+  with a ripple on every node it reaches and a caption card (type, route names,
+  who it was heard from, SNR). Filter by packet type.
 - **Settings:** name, position, TX power, LoRa settings, path hash size,
   auto-add, adverts, clock, device stats and reboot (risky ones confirmed).
 - **Gateway:** open sessions, signups with Approve and Deny buttons (the same
