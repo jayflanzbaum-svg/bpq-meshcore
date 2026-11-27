@@ -510,6 +510,20 @@ class RadioWeb:
             rows.append({"idx": i, "name": name, "hash": p.get("channel_hash")})
         return {"channels": rows, "bridge_channel": self.bridge.chan}
 
+    async def get_log(self, q) -> Dict:
+        """Tail of the bridge's own log file, for the Gateway page (replaces watching the console window)."""
+        n = max(10, min(int(q.get("lines", 200) or 200), 1000))
+        f = Path(__file__).parent / "logs" / "bpq_meshcore.log"
+        try:
+            with open(f, "rb") as fh:
+                fh.seek(0, os.SEEK_END)
+                fh.seek(max(0, fh.tell() - 200_000))
+                lines = fh.read().decode("utf-8", "replace").splitlines()[-n:]
+        except OSError as e:
+            log.warning("web: cannot read the log: %s", e)
+            raise ApiError(500, "cannot read the log file")
+        return {"lines": lines}
+
     async def get_stats(self, q) -> Dict:
         out = {}
         for key, fn in (("battery", lambda mc: mc.commands.get_bat()),
